@@ -1,18 +1,24 @@
 import { defineAction } from "@agent-native/core/action";
-import { z } from "zod";
 import { extractCards } from "../server/domain/extract-cards";
 import { addExtractedDrafts } from "../server/domain/room";
-import { asMember, memberArgs, readOwnNotes, WRITE } from "../server/lib/room-api";
+import { completeForSeat } from "../server/lib/gemini";
+import { seatBucket } from "../server/lib/guest";
+import { asMember, memberSchemas, readOwnNotes, who, WRITE } from "../server/lib/room-api";
 
 export default defineAction({
-  description: "Turn your private notes into draft cards (cards phase). Drafts stay private until you approve each one. Stage 1 splits sentences; it does not use AI.",
-  schema: z.object({ ...memberArgs }),
+  description:
+    "Turn your private notes into draft cards (cards phase): Gemini drafts one card per fact; if AI is unavailable the notes are split into sentences. " +
+    "Drafts stay private until you approve each one.",
+  ...memberSchemas({}),
   ...WRITE,
-  run: async ({ code, token }) => {
-    // Extraction runs before the save so a slow (model-backed) extractor never holds the room's version check open.
-    const { notes, room } = await readOwnNotes({ code, token });
-    const extracted = await extractCards(notes, room.options);
-    const added = await asMember({ code, token }, (r, me) => addExtractedDrafts(r, me, extracted));
-    return { added };
+  run: async ({ code, token }, ctx) => {
+    const w = await who({ code, token }, ctx);
+    // A valid member (token or bound seat) is checked before the model call; the call runs outside the room's save
+    // loop so a slow model never holds the version check open.
+    const { notes, room, me } = await readOwnNotes(w);
+    const bucket = seatBucket({ room, me });
+    const { cards, source } = await extractCards(notes, room.options, (prompt) => completeForSeat(bucket, prompt));
+    const added = await asMember(w, (r, m) => addExtractedDrafts(r, m, cards));
+    return { added, source };
   },
 });

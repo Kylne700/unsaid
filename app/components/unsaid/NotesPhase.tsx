@@ -73,6 +73,9 @@ export function NotesPhase() {
         <p className="mt-1.5 text-xs text-muted-foreground" aria-live="polite" data-testid="notes-state">
           {state === "saved" ? "Saved." : state === "saving" ? "Saving..." : "Not saved yet."} Next you turn these notes into cards, one fact each.
         </p>
+        <p className="mt-1 text-xs text-muted-foreground" data-testid="gemini-notice">
+          Notes are sent to Google's Gemini API to draft cards; don't enter confidential information.
+        </p>
       </section>
 
       <section aria-labelledby="lean-title">

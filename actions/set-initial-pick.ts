@@ -1,7 +1,7 @@
 import { defineAction } from "@agent-native/core/action";
 import { z } from "zod";
 import { setInitialPick } from "../server/domain/room";
-import { asMember, memberArgs, requireOwnJudgment, WRITE } from "../server/lib/room-api";
+import { asMember, memberArgs, requireOwnJudgment, who, WRITE } from "../server/lib/room-api";
 
 export default defineAction({
   description: "Seal your own first lean (which option you lean to now). Nobody sees it until the reveal. A member's own judgment: the agent cannot call this.",
@@ -10,7 +10,7 @@ export default defineAction({
   agentTool: false,
   run: async ({ code, token, optionId }, ctx) => {
     requireOwnJudgment(ctx);
-    await asMember({ code, token }, (room, me) => setInitialPick(room, me, optionId));
+    await asMember(await who({ code, token }, ctx), (room, me) => setInitialPick(room, me, optionId));
     return { ok: true };
   },
 });

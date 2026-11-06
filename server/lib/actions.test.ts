@@ -1,6 +1,7 @@
 // The seal at the action layer: the same functions the UI and the chat agent call, through a real (in-memory) database.
 import type { ActionCaller, ActionRunContext } from "@agent-native/core/action";
 import { getDbExec } from "@agent-native/core/db";
+import { runWithRequestContext } from "@agent-native/core/server";
 import { beforeAll, describe, expect, it } from "vitest";
 import advancePhase from "../../actions/advance-phase";
 import approveDraft from "../../actions/approve-draft";
@@ -17,11 +18,25 @@ import saveDraft from "../../actions/save-draft";
 import saveNotes from "../../actions/save-notes";
 import setInitialPick from "../../actions/set-initial-pick";
 import { MIGRATIONS } from "../db/migrations";
+import { loadRoom } from "../db/store";
+import { memberByToken } from "../domain/room";
 import { keysDeep, must, SEALED_KEYS } from "../domain/test-helpers";
+import { guestOwner } from "./guest";
 
 type Act<I, R> = { run: (args: I, ctx?: ActionRunContext) => Promise<R> | R };
 const call = <I, R>(a: Act<I, R>, args: I, caller: ActionCaller = "http"): Promise<R> => Promise.resolve(a.run(args, { caller }));
 const ALL_CALLERS: ActionCaller[] = ["tool", "http", "frontend", "mcp", "a2a", "cli", "automation", "webmcp", "mcp-widget", "mcp-widget-write"];
+
+/** The owner id the chat plugin gives the guest run of the member holding `token` (server/lib/guest.ts). */
+async function ownerOf(code: string, token: string): Promise<string> {
+  const room = must(await loadRoom(code));
+  return guestOwner(room, must(memberByToken(room, token)));
+}
+/** The in-app agent's call: inside a guest run bound to that member's seat, without a code or token (its tool schema has neither). */
+const agent = async <I, R>(code: string, token: string, a: Act<I, R>, args: I): Promise<R> => {
+  const userEmail = await ownerOf(code, token);
+  return runWithRequestContext({ userEmail, agentRunAnonymous: true }, () => call(a, args, "tool"));
+};
 
 type AnyView = Record<string, any>; // the action result, read by key like any client would
 
@@ -35,7 +50,8 @@ async function newRoom() {
   const ben = await call(joinRoom, { code: made.code, name: "Ben" });
   const cy = await call(joinRoom, { code: made.code, name: "Cy" });
   const who = { ana: made.token, ben: ben.token, cy: cy.token };
-  const view = (token?: string, caller: ActionCaller = "http") => call(getRoom, token === undefined ? { code: made.code } : { code: made.code, token }, caller) as Promise<AnyView>;
+  const view = (token?: string, caller: ActionCaller = "http") =>
+    (caller === "tool" ? agent(made.code, must(token), getRoom, {}) : call(getRoom, token === undefined ? { code: made.code } : { code: made.code, token }, caller)) as Promise<AnyView>;
   return { code: made.code, who, view };
 }
 const both = (code: string, token: string) => ({ code, token });
@@ -102,8 +118,9 @@ describe("get-room gives every caller the same sealed view", () => {
         const keys = keysDeep(v);
         for (const k of SEALED_KEYS) expect(keys.has(k), `${phase}: ${k}`).toBe(false);
       }
-      // a guest, or a wrong token, only ever gets the join preview
-      for (const g of [await r.view(undefined, "tool"), await r.view("not-a-real-token-1234567890", "tool")]) {
+      // a guest, or a wrong token, only ever gets the join preview; the agent outside a seat gets nothing at all
+      await expect(call(getRoom, both(r.code, r.who.ana), "tool")).rejects.toMatchObject({ errorCode: "no_seat", statusCode: 403 });
+      for (const g of [await r.view(undefined), await r.view("not-a-real-token-1234567890")]) {
         expect(Object.keys(g).sort()).toEqual(["code", "guest", "joinable", "memberCount", "options", "phase", "practice", "question", "tokenInvalid"]);
         expect(JSON.stringify(g)).not.toMatch(/Ana|Ben|Cy|SENTINEL/);
       }
@@ -112,7 +129,8 @@ describe("get-room gives every caller the same sealed view", () => {
 
     // notes
     for (const [name, text] of [["ana", "ANA-SENTINEL Lisbon has cheap flights."], ["ben", "BEN-SENTINEL Berlin rents are rising. Berlin has a big tech scene."], ["cy", "CY-SENTINEL Oslo is dark in winter."]] as const) {
-      await call(saveNotes, { ...both(r.code, r.who[name]), text }, name === "ben" ? "tool" : "frontend"); // the agent may help with notes
+      if (name === "ben") await agent(r.code, r.who.ben, saveNotes, { text }); // the agent may help with notes
+      else await call(saveNotes, { ...both(r.code, r.who[name]), text }, "frontend");
       await call(setInitialPick, { ...both(r.code, r.who[name]), optionId: name === "ana" ? "A" : name === "ben" ? "B" : "C" }, "frontend");
     }
     const notes = await checkPhase("notes");
@@ -121,9 +139,8 @@ describe("get-room gives every caller the same sealed view", () => {
     for (const t of Object.values(r.who)) await call(markDone, { ...both(r.code, t), done: true });
 
     // cards: extraction and approval
-    const ex = await call(extractCardsAction, both(r.code, r.who.ben), "tool");
-    expect(ex.added).toBe(2);
-    expect(await call(extractCardsAction, both(r.code, r.who.ben), "tool")).toEqual({ added: 0 }); // running it twice adds nothing
+    expect(await agent(r.code, r.who.ben, extractCardsAction, {})).toEqual({ added: 2, source: "splitter" }); // no Gemini key in tests
+    expect(await agent(r.code, r.who.ben, extractCardsAction, {})).toEqual({ added: 0, source: "splitter" }); // running it twice adds nothing
     const cards = await checkPhase("cards");
     expect(cards.drafts).toEqual([]); // Ana has none, Ben's two are Ben's alone
     const benDrafts = (await r.view(r.who.ben)).drafts as AnyView[];
@@ -144,7 +161,7 @@ describe("get-room gives every caller the same sealed view", () => {
     await call(mergeCards, { ...both(r.code, r.who.ana), keepId: must(x).id, absorbId: must(y).id });
     expect(((await r.view(r.who.ana)).ledger as AnyView[]).length).toBe(4);
     expect((await r.view(r.who.ana)).uniqueCount).toBe(3); // the merged card has two holders
-    await call(advancePhase, both(r.code, r.who.ana), "tool"); // the creator moves the room on
+    await agent(r.code, r.who.ana, advancePhase, {}); // the creator moves the room on
 
     // weigh: nothing about the cards but neutral text
     const weigh = await checkPhase("weigh");
@@ -196,12 +213,91 @@ describe("get-room gives every caller the same sealed view", () => {
 describe("practice room through the actions", () => {
   it("gives the visitor m1 with a prepared memo, and no way to see the simulated teammates' private notes", async () => {
     const made = await call(createPracticeRoom, {});
-    const v = (await call(getRoom, { code: made.code, token: made.token }, "tool")) as AnyView;
+    const v = (await agent(made.code, made.token, getRoom, {})) as AnyView;
     expect(v.practice).toEqual({ title: expect.any(String) });
     expect(v.me).toMatchObject({ id: "m1", isCreator: true, hasInitialPick: false });
     expect(v.members.map((m: AnyView) => [m.id, m.simulated])).toEqual([["m1", false], ["m2", true], ["m3", true]]);
     expect(v.notes.length).toBeGreaterThan(200);
     await expect(call(joinRoom, { code: made.code, name: "Dee" })).rejects.toMatchObject({ errorCode: "forbidden" });
     await expect(call(markDone, { ...both(made.code, made.token), done: true })).rejects.toMatchObject({ message: expect.stringContaining("Seal your lean") });
+  });
+});
+
+describe("the chat agent acts only as the seat its run is bound to", () => {
+  const mods = import.meta.glob(["../../actions/*.ts", "!../../actions/run.ts"], { eager: true }) as Record<string, { default: Act<Record<string, unknown>, unknown> & { agentTool?: boolean } }>;
+  const byName = Object.fromEntries(Object.entries(mods).map(([p, m]) => [p.replace(/^.*\/([^/]+)\.ts$/, "$1"), m.default]));
+  // Every room tool the agent has, with valid arguments for it.
+  const ROOM_TOOLS: Record<string, Record<string, unknown>> = {
+    "advance-phase": {},
+    "approve-draft": { draftId: "d1" },
+    "delete-draft": { draftId: "d1" },
+    "extract-cards": {},
+    "get-room": {},
+    "mark-done": { done: true },
+    "merge-cards": { keepId: "c1", absorbId: "c2" },
+    "save-draft": { text: "Lisbon has cheap flights.", option: "A", polarity: "pro" },
+    "save-notes": { text: "SEATLESS-WRITE" },
+    "unmerge-card": { cardId: "c1", absorbedId: "c2" },
+    "withdraw-card": { cardId: "c1" },
+  };
+  const docOf = async (code: string) => String((await getDbExec().execute({ sql: "SELECT doc FROM unsaid_rooms WHERE code = ?", args: [code] })).rows[0]?.doc);
+
+  it("covers every agent tool except navigation", () => {
+    const visible = Object.keys(byName).filter((n) => byName[n]?.agentTool !== false && n !== "navigate" && n !== "view-screen");
+    expect(Object.keys(ROOM_TOOLS).sort()).toEqual(visible.sort());
+  });
+
+  it("refuses every room tool without a bound seat, even with a member's code and token in its arguments", async () => {
+    const r = await newRoom();
+    const anaOwner = await ownerOf(r.code, r.who.ana);
+    const benTag = must(/-[0-9a-f]{16}@/.exec(await ownerOf(r.code, r.who.ben)))[0];
+    const practice = await call(createPracticeRoom, {});
+    const practiceRoom = must(await loadRoom(practice.code));
+    const runs: [string, (fn: () => Promise<unknown>) => Promise<unknown>][] = [
+      ["no run context", (fn) => fn()],
+      ["a signed-in session, even with a seat-shaped email", (fn) => Promise.resolve(runWithRequestContext({ userEmail: anaOwner }, fn))],
+      ["a guest run with a made-up tag", (fn) => Promise.resolve(runWithRequestContext({ userEmail: anaOwner.replace(/-[0-9a-f]{16}@/, "-0123456789abcdef@"), agentRunAnonymous: true }, fn))],
+      ["a guest run with another member's tag", (fn) => Promise.resolve(runWithRequestContext({ userEmail: anaOwner.replace(/-[0-9a-f]{16}@/, benTag), agentRunAnonymous: true }, fn))],
+      ["a guest run of a simulated teammate", (fn) => Promise.resolve(runWithRequestContext({ userEmail: guestOwner(practiceRoom, must(practiceRoom.members.find((m) => m.simulated))), agentRunAnonymous: true }, fn))],
+      ["a framework guest run without a seat", (fn) => Promise.resolve(runWithRequestContext({ userEmail: "anon-1234@guest.agent-native.invalid", agentRunAnonymous: true }, fn))],
+    ];
+    const before = await docOf(r.code);
+    for (const [label, inRun] of runs) {
+      for (const [name, args] of Object.entries(ROOM_TOOLS)) {
+        const act = must(byName[name]);
+        await expect(inRun(() => call(act, { ...both(r.code, r.who.ana), ...args }, "tool")), `${label}: ${name}`).rejects.toMatchObject({ errorCode: "no_seat", statusCode: 403 });
+      }
+    }
+    expect(await docOf(r.code)).toBe(before); // nothing was written
+  });
+
+  it("ignores a code or token in its arguments: it acts as its own seat, in its own room", async () => {
+    const r = await newRoom();
+    const other = await newRoom();
+    await agent(r.code, r.who.ben, saveNotes, { ...both(r.code, r.who.ana), text: "BEN-SEAT-1" });
+    await agent(r.code, r.who.ben, saveNotes, { ...both(other.code, other.who.ana), text: "BEN-SEAT-2" });
+    expect((await r.view(r.who.ben)).notes).toBe("BEN-SEAT-2");
+    expect((await r.view(r.who.ana)).notes).toBe("");
+    expect((await other.view(other.who.ana)).notes).toBe("");
+    // and inside its seat it still never makes a member's own judgment
+    await expect(agent(r.code, r.who.ben, setInitialPick, { optionId: "A" })).rejects.toMatchObject({ errorCode: "own_judgment_only" });
+  });
+
+  it("two seats of one room each get exactly their member's view", async () => {
+    const r = await newRoom();
+    await call(saveNotes, { ...both(r.code, r.who.ana), text: "ANA-ONLY" });
+    await call(saveNotes, { ...both(r.code, r.who.ben), text: "BEN-ONLY" });
+    for (const t of [r.who.ana, r.who.ben]) expect(await r.view(t, "tool")).toEqual(await r.view(t));
+    expect(JSON.stringify(await r.view(r.who.ana, "tool"))).not.toContain("BEN-ONLY");
+    expect(JSON.stringify(await r.view(r.who.ben, "tool"))).not.toContain("ANA-ONLY");
+  });
+
+  it("every other caller needs the code and the member's token", async () => {
+    const r = await newRoom();
+    for (const caller of ALL_CALLERS.filter((c) => c !== "tool")) {
+      await expect(call(saveNotes, { code: r.code, text: "x" }, caller), caller).rejects.toMatchObject({ errorCode: "forbidden", statusCode: 403 });
+      await expect(call(extractCardsAction, { token: r.who.ana }, caller), caller).rejects.toMatchObject({ errorCode: "forbidden", statusCode: 403 });
+      expect(((await call(getRoom, { code: r.code }, caller)) as AnyView).guest, caller).toBe(true);
+    }
   });
 });

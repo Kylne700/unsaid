@@ -3,23 +3,51 @@
 import { fail, type ActionRunContext } from "@agent-native/core/action";
 import { z } from "zod";
 import { insertRoom, loadRoom, mutateRoom } from "../db/store";
-import { memberByToken } from "../domain/room";
+import { memberByToken, needPhase } from "../domain/room";
 import type { Member, Room } from "../domain/types";
 import { newRoomCode, normalizeCode, RoomError } from "../domain/util";
 import { guestView, viewRoom, type GuestView, type RoomView } from "../domain/view";
+import { boundSeat } from "./guest";
 
 export const codeArg = z.string().min(4).max(12).describe("Room code, e.g. K7M2QX");
+/** UI callers send both; the chat agent sends neither (see who()). */
 export const memberArgs = {
-  code: codeArg,
-  token: z.string().min(16).max(100).describe("The calling member's secret token for this room"),
+  code: codeArg.optional(),
+  token: z.string().min(16).max(100).optional().describe("The calling member's secret token for this room"),
 };
+
+/** A member action's schema, and the one the chat agent sees: no code, no token (its runs are bound to a seat). */
+export const memberSchemas = <T extends z.ZodRawShape>(shape: T) => ({
+  schema: z.object({ ...memberArgs, ...shape }),
+  agentInputSchema: z.object(shape),
+});
+
+/** The member an action acts for: a seat the server bound (chat agent), or the holder of a token (everyone else). */
+export type Who = { code: string; token: string } | { code: string; memberId: string };
+
+/**
+ * The in-app agent ("tool") acts only as the seat its run is bound to (server/lib/guest.ts); a code or token in its
+ * arguments is ignored. Any other caller must send a room code and that member's token.
+ */
+export async function who(args: { code?: string | undefined; token?: string | undefined }, ctx: ActionRunContext | undefined): Promise<Who> {
+  if (ctx?.caller === "tool") {
+    const seat = await boundSeat();
+    if (!seat) fail("The assistant only acts inside a room you have joined, from that room's page.", { errorCode: "no_seat", statusCode: 403 });
+    return { code: seat.room.code, memberId: seat.me.id };
+  }
+  if (!args.code || !args.token) fail("A room code and your member token are required.", { errorCode: "forbidden", statusCode: 403 });
+  return { code: args.code, token: args.token };
+}
+
+const memberOf = (room: Room, w: Who): Member | null =>
+  "token" in w ? memberByToken(room, w.token) : (room.members.find((m) => m.id === w.memberId && m.tokenHash) ?? null);
 
 /** Writes: the audit log keeps who called (UI or agent) and which room, never the arguments (they hold tokens and notes). */
 export const WRITE = {
   http: { method: "POST" as const },
   requiresAuth: false,
   changeEvents: false,
-  audit: { recordInputs: false, target: (a: { code: string }) => ({ type: "room", id: normalizeCode(a.code) }) },
+  audit: { recordInputs: false, target: (a: { code?: string | undefined }) => ({ type: "room", id: a.code ? normalizeCode(a.code) : "bound-seat" }) },
 };
 
 // A member's own judgments. Neither the in-app agent ("tool") nor MCP/A2A/CLI/automation callers may make them.
@@ -44,34 +72,37 @@ export async function inRoom<T>(code: string, change: (room: Room) => T | Promis
   }
 }
 
-/** Same, as the member who owns `token`. */
-export const asMember = <T>(args: { code: string; token: string }, change: (room: Room, me: Member) => T | Promise<T>): Promise<T> =>
-  inRoom(args.code, (room) => {
-    const me = memberByToken(room, args.token);
+/** Same, as that member. */
+export const asMember = <T>(w: Who, change: (room: Room, me: Member) => T | Promise<T>): Promise<T> =>
+  inRoom(w.code, (room) => {
+    const me = memberOf(room, w);
     if (!me) throw new RoomError("You are not a member of this room.", "forbidden");
     return change(room, me);
   });
 
-/** The room as this caller may see it. No token, or a wrong one, gets the join preview only. */
-export async function readView(args: { code: string; token?: string | undefined }): Promise<RoomView | GuestView> {
+/** The room as this caller may see it: the agent sees its bound seat; anyone else without a valid token gets the join preview. */
+export async function readView(args: { code?: string | undefined; token?: string | undefined }, ctx: ActionRunContext | undefined): Promise<RoomView | GuestView> {
+  const w = ctx?.caller === "tool" ? await who(args, ctx) : null;
   try {
-    const room = await loadRoom(normalizeCode(args.code));
+    const code = w?.code ?? args.code;
+    const room = code ? await loadRoom(normalizeCode(code)) : null;
     if (!room) throw new RoomError("Room not found. Check the code.", "not_found");
-    const me = memberByToken(room, args.token);
+    const me = w ? memberOf(room, w) : memberByToken(room, args.token);
     return me ? viewRoom(room, me) : guestView(room, Boolean(args.token));
   } catch (e) {
     return failFrom(e);
   }
 }
 
-/** Reads the caller's own notes (for extraction, which must run outside the save loop). */
-export async function readOwnNotes(args: { code: string; token: string }): Promise<{ notes: string; room: Room }> {
+/** The member's own notes, cards phase only (extraction runs outside the save loop, so it reads first). */
+export async function readOwnNotes(w: Who): Promise<{ notes: string; room: Room; me: Member }> {
   try {
-    const room = await loadRoom(normalizeCode(args.code));
+    const room = await loadRoom(normalizeCode(w.code));
     if (!room) throw new RoomError("Room not found. Check the code.", "not_found");
-    const me = memberByToken(room, args.token);
+    const me = memberOf(room, w);
     if (!me) throw new RoomError("You are not a member of this room.", "forbidden");
-    return { notes: room.notes[me.id] ?? "", room };
+    needPhase(room, "cards");
+    return { notes: room.notes[me.id] ?? "", room, me };
   } catch (e) {
     return failFrom(e);
   }

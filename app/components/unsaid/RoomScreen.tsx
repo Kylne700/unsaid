@@ -1,8 +1,11 @@
+import { appServerPath } from "@agent-native/core/client/api-path";
+import { AgentSidebar, AgentToggleButton } from "@agent-native/toolkit/app/chat";
 import { IconCheck, IconCopy } from "@tabler/icons-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { useRoomActions } from "@/hooks/use-room";
+import { TAB_ID } from "@/lib/tab-id";
 
 import type { RoomView } from "../../../server/domain/view";
 import { errorText, OptionTag } from "./bits";
@@ -34,14 +37,51 @@ function InviteLink({ code }: { code: string }) {
   );
 }
 
+/** Binds the chat to this seat. Only the server reads the cookie (server/lib/guest.ts); the agent never sees it. */
+function setSeatCookie(code: string, token: string) {
+  const path = new URL(appServerPath("/_agent-native"), window.location.href).pathname;
+  const secure = window.location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `unsaid_seat=${code}.${token}; Path=${path}; SameSite=Strict${secure}`;
+}
+
+/** Set during render (idempotent), so it is there before the sidebar below mounts and makes its first chat request.
+ *  Set again on focus, so with two rooms open the chat follows the window in front. */
+function useSeatCookie(code: string, token: string) {
+  if (typeof document !== "undefined") setSeatCookie(code, token);
+  useEffect(() => {
+    const set = () => setSeatCookie(code, token);
+    window.addEventListener("focus", set);
+    return () => window.removeEventListener("focus", set);
+  }, [code, token]);
+}
+
 export function RoomScreen({ code, token, room, refresh }: { code: string; token: string; room: RoomView; refresh: () => Promise<unknown> }) {
   const { run, busy, error, clearError } = useRoomActions(code, token, refresh);
   const beforeDone = useRef<(() => Promise<void>) | null>(null);
   const ctx = useMemo(() => ({ room, run, busy, beforeDone }), [room, run, busy]);
+  useSeatCookie(code, token);
 
   return (
     <RoomProvider value={ctx}>
-      <Shell right={<span className="font-mono tracking-widest" data-testid="room-code">{room.code}</span>}>
+      <AgentSidebar
+        position="right"
+        defaultOpen
+        storageKey={`unsaid-${room.code}`}
+        browserTabId={TAB_ID}
+        showMissingApiKeySetup={false}
+        showModelSelector={false}
+        composerPlaceholder="Ask about your notes or this room"
+        emptyStateText="I help you put down what you know and turn it into cards. I never vote, rate or recommend."
+        suggestions={["Draft cards from my notes", "Where does the room stand?", "What can you do for me?"]}
+      >
+      <Shell
+        right={
+          <span className="flex items-center gap-3">
+            <span className="font-mono tracking-widest" data-testid="room-code">{room.code}</span>
+            <AgentToggleButton />
+          </span>
+        }
+      >
         <header className="mb-6">
           {room.practice ? (
             <p className="mb-2 rounded-md bg-sky-500/10 px-3 py-2 text-sm text-sky-900 dark:text-sky-100" data-testid="practice-banner">
@@ -82,6 +122,7 @@ export function RoomScreen({ code, token, room, refresh }: { code: string; token
           {room.phase === "reveal" ? <RevealPhase /> : null}
         </div>
       </Shell>
+      </AgentSidebar>
     </RoomProvider>
   );
 }

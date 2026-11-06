@@ -85,6 +85,17 @@ export function neutralize(text: string, options: OptionDef[], subject?: string 
 }
 
 /** Which options a text names (by name or alias), as option ids. */
+/**
+ * Whether a neutral wording may still point at an option: "option B", or a word of 4+ letters from an option's name
+ * or aliases (neutralize() replaces whole names, so "Kelvane" alone slips through when only "Kelvane Desk" is listed).
+ * shortcut: may flag a common word that is part of an option name ("basic" for "Cobbleline Basic"); it only warns.
+ */
+export function mayNameOption(text: string, options: OptionDef[]): boolean {
+  const words = options.flatMap((o) => [o.name, ...o.aliases]).flatMap((n) => n.split(/[^\p{L}\p{N}]+/u)).filter((w) => w.length >= 4 && !/^(option|another)$/i.test(w));
+  const parts = [...words.map(escapeRegex), ...options.map((o) => `option\\s+${escapeRegex(o.id)}`)];
+  return parts.length > 0 && new RegExp(`(?<![\\p{L}\\p{N}])(?:${parts.join("|")})(?![\\p{L}\\p{N}])`, "iu").test(text);
+}
+
 export function optionsNamed(text: string, options: OptionDef[]): string[] {
   return options.filter((o) => {
     const re = optionNameRegex([o]);

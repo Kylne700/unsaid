@@ -3,7 +3,7 @@
 import { getScenario } from "./scenario";
 import { buildReveal, holdersOf, rank, type Ranking, type Scores, uniqueCount } from "./ledger";
 import type { Absorbed, Card, Member, Phase, Polarity, Room } from "./types";
-import { seededShuffle } from "./util";
+import { mayNameOption, seededShuffle } from "./util";
 
 export const DISCLAIMER = "Unsaid never votes or recommends. These are your team's facts and your team's weights.";
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
@@ -40,6 +40,8 @@ export interface DraftView {
   origin: "notes" | "practice" | "manual";
   phrase: string | null;
   ready: boolean;
+  /** The neutral wording may still name an option (see mayNameOption). */
+  leak: boolean;
 }
 export interface LedgerCardView {
   id: string;
@@ -154,7 +156,7 @@ export function viewRoom(room: Room, me: Member): RoomView {
       phase === "cards"
         ? room.drafts
             .filter((d) => d.ownerId === me.id)
-            .map((d) => ({ id: d.id, option: d.option, polarity: d.polarity, text: d.text, neutral: d.neutral, origin: d.origin, phrase: d.phrase, ready: d.option !== null && d.polarity !== null }))
+            .map((d) => ({ id: d.id, option: d.option, polarity: d.polarity, text: d.text, neutral: d.neutral, origin: d.origin, phrase: d.phrase, ready: d.option !== null && d.polarity !== null, leak: mayNameOption(d.neutral, room.options) }))
         : null,
     // Cards show their option and holders only before the blind weigh and after it, never during.
     ledger: phase === "cards" ? room.cards.map((c) => ledgerCard(c, false)) : phase === "vote" ? room.cards.map((c) => ledgerCard(c, true)) : null,

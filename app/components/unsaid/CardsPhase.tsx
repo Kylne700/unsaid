@@ -130,6 +130,11 @@ function DraftRow({ d }: { d: DraftView }) {
           }}
         />
       </label>
+      {d.leak ? (
+        <p className="mt-2 text-xs text-amber-700 dark:text-amber-400" data-testid="draft-leak">
+          This wording may still give the option away. Reword it so the blind weigh stays blind.
+        </p>
+      ) : null}
       {!ready ? <p className="mt-2 text-xs text-muted-foreground">Choose the option and pro or con to approve this card.</p> : null}
     </li>
   );
@@ -245,8 +250,10 @@ export function CardsPhase() {
 
   async function extract() {
     setExtractNote(null);
-    const r = await run<{ added: number }>("extract-cards");
-    if (r.ok) setExtractNote(r.data.added ? `Added ${r.data.added} draft${r.data.added === 1 ? "" : "s"} from your notes.` : "No new sentences found in your notes.");
+    const r = await run<{ added: number; source: "gemini" | "splitter" }>("extract-cards");
+    if (!r.ok) return;
+    const n = `${r.data.added} draft${r.data.added === 1 ? "" : "s"}`;
+    setExtractNote(!r.data.added ? "No new facts found in your notes." : r.data.source === "gemini" ? `Gemini drafted ${n} from your notes.` : `Added ${n}, one per sentence (AI unavailable right now).`);
   }
 
   return (

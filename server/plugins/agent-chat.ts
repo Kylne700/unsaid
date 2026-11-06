@@ -1,7 +1,9 @@
 import { getOrgContext } from "@agent-native/core/org";
-import { createAgentChatPlugin, loadActionsFromStaticRegistry } from "@agent-native/core/server";
+import { createAgentChatPlugin, loadActionsFromStaticRegistry, registerAuthPublicPaths } from "@agent-native/core/server";
 
 import actionsRegistry from "../../.generated/actions-registry.js";
+import { chatEngine } from "../lib/gemini";
+import { ownerFromSeatCookie } from "../lib/guest";
 
 // The agent gets the same actions as the UI, minus the ones that mint tokens or make a member's own judgment
 // (create-room, create-practice-room, join-room, set-initial-pick, rate-card, cast-vote are agentTool:false).
@@ -21,7 +23,20 @@ const INITIAL_TOOL_NAMES = [
   "advance-phase",
 ];
 
-const SYSTEM_PROMPT = `You are the Unsaid assistant inside one team decision room. You help one member at a time, the member whose secret room token the app gives you, to put down what they know and to understand where the room stands.
+// The auth guard answers 401 to every /_agent-native/* request without a session. A guest chats through exactly
+// these routes, and each one resolves its owner itself (session, else the seat cookie through anonymousOwner, else
+// 401) and touches only that owner's threads and runs. Every other chat route (save-key, files, skills, shared,
+// mode, generate-title, stream tokens) keeps the guard.
+registerAuthPublicPaths([
+  "/_agent-native/agent-chat",
+  "/_agent-native/agent-chat/threads",
+  "/_agent-native/agent-chat/threads/:id",
+  "/_agent-native/agent-chat/threads/:id/:part",
+  "/_agent-native/agent-chat/runs/:id",
+  "/_agent-native/agent-chat/runs/:id/:part",
+]);
+
+const SYSTEM_PROMPT = `You are the Unsaid assistant inside one team decision room. You help one member of one room, the person you are talking to, to put down what they know and to understand where the room stands. Every tool already acts as that member in that room; you never need a room code or any key.
 
 What you do
 - Read the room with get-room. It already hides everything the current phase must hide.
@@ -48,4 +63,16 @@ export default createAgentChatPlugin({
   codeExecution: { production: "off" },
   resolveOrgId: async (event) => (await getOrgContext(event)).orgId,
   systemPrompt: SYSTEM_PROMPT,
+  // Guests only: the room page's seat cookie becomes the run owner (server/lib/guest.ts); no seat, no chat (401).
+  // chatEngine answers anyone without a seat (a signed-in session too) with a fixed line and never calls Gemini.
+  engine: chatEngine,
+  anonymousOwner: ownerFromSeatCookie,
+  anonymousReadOnly: false,
+  durableBackgroundRuns: false,
+  // Hard allowlist: no framework tool beyond these 13 is ever offered to the model.
+  resolveActionSurface: () => ({ allowedActionNames: INITIAL_TOOL_NAMES }),
+  prepareRequest: () => ({ followUpSuggestions: false }),
+  leanPrompt: true,
+  skipFilesContext: true,
+  lazyContext: true,
 });

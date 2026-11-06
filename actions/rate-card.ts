@@ -1,7 +1,7 @@
 import { defineAction } from "@agent-native/core/action";
 import { z } from "zod";
 import { rateCard } from "../server/domain/room";
-import { asMember, memberArgs, requireOwnJudgment, WRITE } from "../server/lib/room-api";
+import { asMember, memberArgs, requireOwnJudgment, who, WRITE } from "../server/lib/room-api";
 
 export default defineAction({
   description: "Rate how much one card matters, 0 to 3 (weigh phase, blind). A member's own judgment: the agent cannot call this.",
@@ -10,7 +10,7 @@ export default defineAction({
   agentTool: false,
   run: async ({ code, token, cardId, weight }, ctx) => {
     requireOwnJudgment(ctx);
-    await asMember({ code, token }, (room, me) => rateCard(room, me, cardId, weight));
+    await asMember(await who({ code, token }, ctx), (room, me) => rateCard(room, me, cardId, weight));
     return { ok: true };
   },
 });

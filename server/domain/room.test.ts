@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractCards } from "./extract-cards";
+import { splitNotes } from "./extract-cards";
 import { holdersOf, uniqueCount } from "./ledger";
 import { addExtractedDrafts, approveDraft, castVote, createRoom, forceAdvance, joinRoom, memberByToken, mergeCards, rateCard, saveDraft, saveNotes, setDone, setInitialPick, unmergeCard, withdrawCard } from "./room";
 import type { Member, Room } from "./types";
@@ -209,13 +209,13 @@ describe("cards, merge and the unique count", () => {
   });
 });
 
-describe("extractCards stub", () => {
+describe("splitNotes (the fallback without AI)", () => {
   const options = [
     { id: "A", name: "Lisbon", aliases: [] },
     { id: "B", name: "Berlin", aliases: ["BER"] },
   ];
   it("splits bullets and sentences, guesses the option by name, never the side", () => {
-    const out = extractCards("- Lisbon has cheap flights. Rent is low!\n2) Berlin is lively; Lisbon beats Berlin on sun.\nok", options);
+    const out = splitNotes("- Lisbon has cheap flights. Rent is low!\n2) Berlin is lively; Lisbon beats Berlin on sun.\nok", options);
     expect(out.map((x) => x.text)).toEqual(["Lisbon has cheap flights.", "Rent is low!", "Berlin is lively; Lisbon beats Berlin on sun."]);
     expect(out.map((x) => x.option)).toEqual(["A", null, null]); // none or two named: unset
     expect(out.every((x) => x.polarity === null)).toBe(true);
@@ -226,7 +226,7 @@ describe("extractCards stub", () => {
   it("adds drafts once: running it twice does not duplicate", () => {
     const t = live();
     forceAdvance(t.room, t.ana);
-    const found = extractCards("Lisbon has cheap flights. Oslo is dark.", t.room.options);
+    const found = splitNotes("Lisbon has cheap flights. Oslo is dark.", t.room.options);
     expect(addExtractedDrafts(t.room, t.ana, found)).toBe(2);
     expect(addExtractedDrafts(t.room, t.ana, found)).toBe(0);
   });

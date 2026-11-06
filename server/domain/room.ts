@@ -13,7 +13,7 @@ export const NEXT: Record<Phase, Phase | null> = { notes: "cards", cards: "weigh
 const MAX_NOTES = 8000;
 const MAX_TEXT = 400;
 
-function needPhase(room: Room, ...allowed: Phase[]) {
+export function needPhase(room: Room, ...allowed: Phase[]) {
   if (!allowed.includes(room.phase)) throw new RoomError(`Not possible in the "${room.phase}" phase.`, "bad_phase");
 }
 function cleanName(raw: string, what: string): string {

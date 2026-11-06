@@ -7,7 +7,8 @@ export default defineAction({
     "Navigate the UI to a specific view or path. Writes a navigate command to application state which the UI reads and auto-deletes.",
   schema: z.object({
     view: z.string().optional().describe("View name to navigate to"),
-    path: z.string().optional().describe("URL path to navigate to"),
+    // Paths inside this app only: text from other members reaches the agent, so no external or protocol-relative URLs.
+    path: z.string().max(200).regex(/^\/(?![/\\])/, "A path inside this app, starting with a single /").optional().describe("URL path inside this app, e.g. /r/K7M2QX"),
     threadId: z.string().optional().describe("Chat thread ID to open"),
   }),
   http: false,

@@ -7,7 +7,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { assertClean, BASE, newPlayer, rawRoom as raw } from "./harness.mjs";
+import { assertClean, BASE, newPlayer, rawRoom as raw, shootPage, snapBoth } from "./harness.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SHOTS = path.resolve(here, "../../docs/shots");
@@ -21,9 +21,9 @@ const check = (name, ok, detail = "") => {
   console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? ` -- ${detail}` : ""}`);
 };
 
-const ana = await newPlayer("ana", { width: 1180, height: 900 });
-const ben = await newPlayer("ben", { width: 1180, height: 900 });
-const cleo = await newPlayer("cleo", { width: 1180, height: 900 });
+const ana = await newPlayer("ana", { width: 1280, height: 800 });
+const ben = await newPlayer("ben", { width: 1280, height: 800 });
+const cleo = await newPlayer("cleo", { width: 1280, height: 800 });
 const late = await newPlayer("late", { width: 1180, height: 700 });
 const A = ana.page;
 const B = ben.page;
@@ -113,6 +113,7 @@ try {
   await phase(C, "notes");
   live("Ana sees Cleo join without reloading", await took(A, () => !!document.querySelector('[data-testid="member-m3"]'), null));
   await A.screenshot({ path: path.join(SHOTS, "10-live-ana-notes.png") });
+  await snapBoth(A, "10-live-ana-notes");
 
   // ---- notes, sealed lean, force-advance (creator only) ---------------------------------------
   await A.getByTestId("notes-input").fill("Zeta lasts two days on a charge.\nOmega costs 400 euros more than Zeta.\nOmega fans are loud in open offices.");
@@ -170,9 +171,11 @@ try {
   const counters = await Promise.all([A, B, C].map((pg) => pg.getByTestId("unique-count").innerText()));
   check("cards: the counter reads 5 in all three windows", counters.every((t) => /\b5\b/.test(t)), counters.map((t) => t.replace(/\s+/g, " ")).join(" | "));
   check("cards: Ben never sees Ana's loud-office draft", !(await B.locator("main").innerText()).includes("loud in open offices"));
-  await A.screenshot({ path: path.join(SHOTS, "11-live-ana-cards.png"), fullPage: true });
-  await B.screenshot({ path: path.join(SHOTS, "12-live-ben-cards.png"), fullPage: true });
-  await C.screenshot({ path: path.join(SHOTS, "14-live-cleo-cards.png"), fullPage: true });
+  await shootPage(A, path.join(SHOTS, "11-live-ana-cards.png"));
+  await shootPage(B, path.join(SHOTS, "12-live-ben-cards.png"));
+  await shootPage(C, path.join(SHOTS, "14-live-cleo-cards.png"));
+  await snapBoth(A, "11-live-ana-cards");
+  await snapBoth(C, "14-live-cleo-cards");
 
   // ---- merge, split, merge: the counter follows in the other window ---------------------------
   // exact text: other cards list this wording inside their "Same fact as..." menu
@@ -192,6 +195,7 @@ try {
   await phase(A, "weigh");
   await phase(B, "weigh");
   await phase(C, "weigh");
+  await snapBoth(B, "20-live-ben-weigh");
   check("auto-advance: the room reached 'weigh' in all three windows when the last person was done", true);
 
   // ---- weigh: blind, checked over the raw action too ------------------------------------------
@@ -259,12 +263,14 @@ try {
     "vote: each window shows only its own person's guesses",
     sameGuesses(await guessAt(A), { [EUROS]: "Ben", [MATTE]: "Ben" }) && sameGuesses(await guessAt(B), { [SCREEN]: "Ana", [MATTE]: "Ana" }) && sameGuesses(await guessAt(C), { [SCREEN]: "Ben", [EUROS]: "Ana" }),
   );
-  await C.screenshot({ path: path.join(SHOTS, "15-live-cleo-vote.png"), fullPage: true });
+  await shootPage(C, path.join(SHOTS, "15-live-cleo-vote.png"));
+  await snapBoth(C, "15-live-cleo-vote");
 
   await A.getByTestId("expect-same").selectOption("1"); // "one of the other two will pick what I pick"
   await A.getByRole("radio", { name: "Zeta" }).click();
   await A.getByRole("button", { name: "Seal my vote" }).click();
   await A.getByText("Waiting for Ben", { exact: false }).waitFor({ timeout: 8000 });
+  await snapBoth(A, "21-live-ana-vote-sealed");
   const afterAna = JSON.parse(await raw(B, code));
   const badVote = ["votes", "initialPicks", "scores", "ranking", "fullScore", "weights", "whoGuesses", "aloneGuesses", "expectSame"].filter((k) => keysDeep(afterAna).has(k));
   check("vote: with one vote in, the raw data shows no votes, leans, scores or guesses", badVote.length === 0, badVote.join(", "));
@@ -327,7 +333,9 @@ try {
     `${lineA} | ${lineB}`,
   );
   check("reveal: Ana's data has no trace of Ben's alone guess, and Ben's none of Ana's", !JSON.stringify(views[0]).includes('"expected":0') && !JSON.stringify(views[1]).includes('"expected":1'));
-  await A.screenshot({ path: path.join(SHOTS, "13-live-ana-reveal.png"), fullPage: true });
+  await shootPage(A, path.join(SHOTS, "13-live-ana-reveal.png"));
+  await snapBoth(A, "13-live-ana-reveal");
+  await snapBoth(C, "22-live-cleo-reveal");
 
   assertClean(ana, ben, cleo, late);
   check("guest path: no sign-in, no 401/403 beyond the known probe, no page errors (4 windows)", true);
@@ -335,9 +343,9 @@ try {
   console.log(`timings (ms): ${timings.map(([n, ms]) => `${ms}`).join(", ")}; max ${Math.max(...timings.map(([, ms]) => ms))}`);
 } catch (e) {
   console.log(`ERROR ${e.message}`);
-  await A.screenshot({ path: path.join(SHOTS, "error-ana.png"), fullPage: true }).catch(() => {});
-  await B.screenshot({ path: path.join(SHOTS, "error-ben.png"), fullPage: true }).catch(() => {});
-  await C.screenshot({ path: path.join(SHOTS, "error-cleo.png"), fullPage: true }).catch(() => {});
+  await shootPage(A, path.join(SHOTS, "error-ana.png")).catch(() => {});
+  await shootPage(B, path.join(SHOTS, "error-ben.png")).catch(() => {});
+  await shootPage(C, path.join(SHOTS, "error-cleo.png")).catch(() => {});
   checks.push({ name: "run", ok: false, detail: e.message });
 } finally {
   await ana.close();

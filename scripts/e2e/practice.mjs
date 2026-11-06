@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import scenario from "../../server/scenarios/vendor.json" with { type: "json" };
-import { assertClean, BASE, newPlayer, rawRoom } from "./harness.mjs";
+import { assertClean, BASE, newPlayer, rawRoom, shootPage, snapBoth } from "./harness.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SHOTS = path.resolve(here, "../../docs/shots");
@@ -18,9 +18,13 @@ const check = (name, ok, detail = "") => {
   console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? ` -- ${detail}` : ""}`);
 };
 
-const p = await newPlayer("practice", { width: 1280, height: 900 });
+const p = await newPlayer("practice", { width: 1280, height: 800 });
 const { page } = p;
-const shot = (name, full = false) => page.screenshot({ path: path.join(SHOTS, name), fullPage: full });
+const shot = async (name, full = false) => {
+  if (!full) return page.screenshot({ path: path.join(SHOTS, name) });
+  await shootPage(page, path.join(SHOTS, name));
+  await snapBoth(page, name.replace(/\.png$/, ""));
+};
 const phase = (name) => page.waitForSelector(`[data-testid="phase-bar"][data-phase="${name}"]`, { timeout: 15000 });
 
 try {

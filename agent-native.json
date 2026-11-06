@@ -6,7 +6,8 @@
   "doctor": {
     "failOnBuild": false,
     "dbToolScopingDenylist": {
-      "unsaid_rooms": "Rooms are guest-owned (member token, no account), so the table has no owner_email. One JSON doc per room holds sealed picks, votes and token hashes. Every real read goes through viewRoom() in server/domain/view.ts. The raw database tools see an unscoped table as an empty view (1 = 0 in the framework's scoping.js) and the chat agent has no raw database tool."
+      "unsaid_rooms": "Rooms are guest-owned (member token, no account), so the table has no owner_email. One JSON doc per room holds sealed picks, votes and token hashes. Every real read goes through viewRoom() in server/domain/view.ts. The raw database tools see an unscoped table as an empty view (1 = 0 in the framework's scoping.js) and the chat agent has no raw database tool.",
+      "unsaid_llm_usage": "App-wide Gemini request counters per UTC day (bucket = 'app' or one room member), no user data and no owner. Written only by server/lib/llm-quota.ts; the chat agent has no raw database tool."
     }
   }
 }

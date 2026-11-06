@@ -65,10 +65,11 @@ describe("caller allowlist for a member's own judgment", () => {
     await call(approveDraft, { ...both(r.code, r.who.ana), draftId });
     await call(advancePhase, both(r.code, r.who.ana)); // weigh
     const cardId = must(((await r.view(r.who.ana)).weigh as AnyView).cards[0]).id as string;
-    await expect(call(rateCard, { ...both(r.code, r.who.ana), cardId, weight: 3 }, "tool")).rejects.toMatchObject({ errorCode: "own_judgment_only" });
+    const notUi = ALL_CALLERS.filter((c) => c !== "http" && c !== "frontend");
+    for (const caller of notUi) await expect(call(rateCard, { ...both(r.code, r.who.ana), cardId, weight: 3 }, caller), caller).rejects.toMatchObject({ errorCode: "own_judgment_only", statusCode: 403 });
     await call(rateCard, { ...both(r.code, r.who.ana), cardId, weight: 3 }, "frontend");
     await call(advancePhase, both(r.code, r.who.ana)); // vote
-    await expect(call(castVote, { ...both(r.code, r.who.ana), optionId: "A" }, "tool")).rejects.toMatchObject({ errorCode: "own_judgment_only" });
+    for (const caller of notUi) await expect(call(castVote, { ...both(r.code, r.who.ana), optionId: "A" }, caller), caller).rejects.toMatchObject({ errorCode: "own_judgment_only", statusCode: 403 });
     expect(((await r.view(r.who.ana)).me as AnyView).hasVoted).toBe(false);
     await call(castVote, { ...both(r.code, r.who.ana), optionId: "A" }, "frontend");
     expect(((await r.view(r.who.ana)).me as AnyView).hasVoted).toBe(true);

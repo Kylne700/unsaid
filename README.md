@@ -107,4 +107,4 @@ Unsaid sends text to Google's Gemini API (model `gemini-3.5-flash-lite`, free ti
 
 ## License
 
-The template this app started from is MIT licensed (Copyright (c) 2026 Builder.io, Inc.). Its license terms are kept intact: the full MIT text and copyright notice are in [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt). Libraries installed from npm keep their own licenses. This repository has no license file of its own yet.
+Unsaid's own code is MIT licensed (Copyright (c) 2026 Kylne700): see [LICENSE](LICENSE). The template this app started from is MIT licensed too (Copyright (c) 2026 Builder.io, Inc.). Its license terms are kept intact: the full MIT text and copyright notice are in [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt). Libraries installed from npm keep their own licenses.

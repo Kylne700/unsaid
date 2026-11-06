@@ -3,7 +3,7 @@
 // asks to seal the lean, rate and vote (each must leave the room unchanged). Live room: two members, each chat sees
 // only its own seat (its get-room equals the member's own view; threads and runs are not reachable across seats;
 // no or a forged seat cookie gets no chat). Every thread save is checked for the members' tokens and their sha256.
-// About 25 real Gemini requests per run; the dev server needs UNSAID_GEMINI_API_KEY in its .env.
+// About 15 real Gemini requests per run (14 and 15 measured); the dev server needs UNSAID_GEMINI_API_KEY in its .env.
 // Run: node scripts/e2e/agent.mjs --pw-core=<path to playwright-core/index.mjs> [--base=...] [--secrets-out=<file>]
 //   --secrets-out writes the run's member tokens (mode 0600) for a database check after the server stops; never printed.
 import { createHash } from "node:crypto";

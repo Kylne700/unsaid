@@ -74,7 +74,8 @@ export function NotesPhase() {
           {state === "saved" ? "Saved." : state === "saving" ? "Saving..." : "Not saved yet."} Next you turn these notes into cards, one fact each.
         </p>
         <p className="mt-1 text-xs text-muted-foreground" data-testid="gemini-notice">
-          Notes are sent to Google's Gemini API to draft cards; don't enter confidential information.
+          Notes you turn into cards, and your chat messages, are sent to Google's Gemini API (free tier). Google's terms for it say "human reviewers may read, annotate, and process your API input and output." and "Do not submit
+          sensitive, confidential, or personal information to the Unpaid Services." Use made-up or non-sensitive text.
         </p>
       </section>
 

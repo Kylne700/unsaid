@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 
-import type { RevealView } from "../../../server/domain/view";
+import type { GuessWhoView, RevealView } from "../../../server/domain/view";
 import { listNames, meName, nameOfOption, OptionTag, PolarityMark, SectionTitle, Tag, Who } from "./bits";
 import { useRoomCtx } from "./room-context";
 
@@ -26,6 +26,80 @@ function Cell({ score, ranking, optionId }: { score: number; ranking: Ranking; o
         {p.tied ? " (tie)" : ""}
       </span>
     </td>
+  );
+}
+
+const GUESS_MEANING: Record<NonNullable<GuessWhoView["result"]>["verdict"], string> = {
+  above: "Well above luck: people could tell who said what.",
+  near: "Close to luck: the facts were judged without names.",
+  below: "Below luck: no sign that people could tell who said what.",
+};
+
+function GuessWho({ gw }: { gw: GuessWhoView }) {
+  const r = gw.result;
+  const practice = gw.scope === "practice";
+  return (
+    <section aria-labelledby="guess-title" data-testid="guess-who" data-scope={gw.scope}>
+      <SectionTitle hint="On the vote screen you could guess who knew a fact that only one other person knew.">
+        <span id="guess-title">Guess who</span>{" "}
+        {practice ? <Tag className="ml-1 align-middle text-muted-foreground">Practice</Tag> : null}
+      </SectionTitle>
+      <div className="rounded-lg border bg-card p-4 text-sm">
+        {practice ? (
+          <>
+            <p data-testid="guess-practice">
+              {r ? (
+                <>
+                  <strong>
+                    Your guesses: {r.right} of {r.guesses} right.
+                  </strong>{" "}
+                  Luck would give {r.chancePct}%.
+                </>
+              ) : (
+                "You made no guesses. On the vote screen you can guess who knew a fact."
+              )}
+            </p>
+            <p className="mt-2 text-muted-foreground" data-testid="guess-meaning">
+              In a real room everyone's guesses become one number for the whole room. Close to luck means the facts were judged without names. Well above luck means people could tell who said what.
+            </p>
+          </>
+        ) : r ? (
+          <>
+            <p className="text-2xl font-semibold tabular-nums" data-testid="guess-pct">
+              {r.rightPct}% right
+            </p>
+            <p className="mt-1 text-muted-foreground" data-testid="guess-detail">
+              {r.right} of {r.guesses} guesses, from {r.guessers} people. Luck would give {r.chancePct}%.
+            </p>
+            <p className="mt-3" data-testid="guess-meaning">
+              {GUESS_MEANING[r.verdict]}
+            </p>
+          </>
+        ) : (
+          <p className="text-muted-foreground" data-testid="guess-hidden">
+            No room-wide number this time. It only shows when enough people guessed and it cannot give away one person's guesses.
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function AloneCheck({ a }: { a: NonNullable<RevealView["aloneCheck"]> }) {
+  const reading =
+    a.actual > a.expected ? "More of them picked your option than you thought." : a.actual < a.expected ? "Fewer of them picked your option than you thought." : "You read the room right.";
+  return (
+    <section aria-labelledby="alone-title" data-testid="alone-check">
+      <SectionTitle hint="Your own guess from the vote screen. Only you see it.">
+        <span id="alone-title">Alone check</span>
+      </SectionTitle>
+      <div className="rounded-lg border bg-card p-4 text-sm">
+        <p data-testid="alone-line">
+          You expected <strong>{a.expected}</strong> of {a.others} to pick the same option as you. <strong>{a.actual}</strong> did.
+        </p>
+        <p className="mt-1 text-muted-foreground">{reading}</p>
+      </div>
+    </section>
   );
 }
 
@@ -145,6 +219,8 @@ export function RevealPhase() {
         </ul>
       </section>
 
+      {rv.aloneCheck ? <AloneCheck a={rv.aloneCheck} /> : null}
+
       <section aria-labelledby="unique-title">
         <SectionTitle
           hint={
@@ -185,6 +261,8 @@ export function RevealPhase() {
           </ul>
         ) : null}
       </section>
+
+      {rv.guessWho ? <GuessWho gw={rv.guessWho} /> : null}
 
       <details className="rounded-lg border bg-card px-4 py-3 text-sm">
         <summary className="cursor-pointer font-medium">All {rv.cards.length} cards with their team weights</summary>

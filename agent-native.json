@@ -4,6 +4,9 @@
     "firstRun": "off"
   },
   "doctor": {
-    "failOnBuild": false
+    "failOnBuild": false,
+    "dbToolScopingDenylist": {
+      "unsaid_rooms": "Rooms are guest-owned (member token, no account), so the table has no owner_email. One JSON doc per room holds sealed picks, votes and token hashes. Every real read goes through viewRoom() in server/domain/view.ts. The raw database tools see an unscoped table as an empty view (1 = 0 in the framework's scoping.js) and the chat agent has no raw database tool."
+    }
   }
 }

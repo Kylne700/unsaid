@@ -1,4 +1,4 @@
-// Gemini free tier: 500 requests per day per project. The app keeps under it with a daily cap in the database
+// The Gemini free tier has a daily request limit per project. The app keeps under it with a daily cap in the database
 // (so every server instance shares it) and gives each room member a smaller cap of their own.
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "../db/index.js";

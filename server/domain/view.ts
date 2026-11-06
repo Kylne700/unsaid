@@ -48,9 +48,10 @@ export interface LedgerCardView {
   option: string;
   polarity: Polarity;
   text: string;
-  holders: { id: string; name: string }[];
+  /** Does the caller hold this card, and how many members hold it. Who the others are comes with the reveal. */
   mine: boolean;
-  merged: { id: string; text: string; holders: string[] }[];
+  holderCount: number;
+  merged: { id: string; text: string; mine: boolean; holderCount: number }[];
   /** The caller's own rating, only once ratings exist (vote phase). */
   myRating: number | null;
 }
@@ -116,7 +117,6 @@ export function guestView(room: Room, tokenInvalid = false): GuestView {
 }
 
 export function viewRoom(room: Room, me: Member): RoomView {
-  const nameOf = (id: string) => room.members.find((m) => m.id === id)?.name ?? "?";
   const myRatings = room.ratings[me.id] ?? {};
   const phase = room.phase;
   const ledgerCard = (c: Card, withRating: boolean): LedgerCardView => {
@@ -126,9 +126,9 @@ export function viewRoom(room: Room, me: Member): RoomView {
       option: c.option,
       polarity: c.polarity,
       text: c.text,
-      holders: holders.map((id) => ({ id, name: nameOf(id) })),
       mine: holders.includes(me.id),
-      merged: c.absorbed.map((a: Absorbed) => ({ id: a.id, text: a.text, holders: a.ownHolders.map(nameOf) })),
+      holderCount: holders.length,
+      merged: c.absorbed.map((a: Absorbed) => ({ id: a.id, text: a.text, mine: a.ownHolders.includes(me.id), holderCount: a.ownHolders.length })),
       myRating: withRating ? (myRatings[c.id] ?? null) : null,
     };
   };
@@ -158,8 +158,10 @@ export function viewRoom(room: Room, me: Member): RoomView {
             .filter((d) => d.ownerId === me.id)
             .map((d) => ({ id: d.id, option: d.option, polarity: d.polarity, text: d.text, neutral: d.neutral, origin: d.origin, phrase: d.phrase, ready: d.option !== null && d.polarity !== null, leak: mayNameOption(d.neutral, room.options) }))
         : null,
-    // Cards show their option and holders only before the blind weigh and after it, never during.
-    ledger: phase === "cards" ? room.cards.map((c) => ledgerCard(c, false)) : phase === "vote" ? room.cards.map((c) => ledgerCard(c, true)) : null,
+    // Cards show their option before the blind weigh and after it, never during. Never who holds them (only whether
+    // the caller does, and how many do) until the reveal. The vote list is shuffled (same order for everyone, stable
+    // per room) so the order the cards were approved in cannot tell who wrote which.
+    ledger: phase === "cards" ? room.cards.map((c) => ledgerCard(c, false)) : phase === "vote" ? seededShuffle(room.cards, `${room.seed}:vote`).map((c) => ledgerCard(c, true)) : null,
     weigh: null,
     reveal: null,
   };

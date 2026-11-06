@@ -40,6 +40,13 @@ export function PolarityMark({ polarity }: { polarity: "pro" | "con" }) {
 /** "Ben (you)" for the viewer; the practice player is already called "You", so no second "(you)". */
 export const meName = (name: string) => (/^you$/i.test(name.trim()) ? name : `${name} (you)`);
 
+/** Who knew a card, without names (they come with the reveal): "you", "you and 2 others", "1 person", "3 people". */
+export function knownBy(mine: boolean, count: number): string {
+  const others = count - (mine ? 1 : 0);
+  if (mine) return others === 0 ? "you" : `you and ${others} other${others === 1 ? "" : "s"}`;
+  return `${count} ${count === 1 ? "person" : "people"}`;
+}
+
 /** A name, with a "simulated" label when it is a scripted teammate. */
 export function Who({ name, simulated, className }: { name: string; simulated?: boolean | undefined; className?: string }) {
   return (

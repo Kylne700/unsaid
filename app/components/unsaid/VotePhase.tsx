@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-import { OptionTag, PolarityMark, SectionTitle, Who } from "./bits";
+import { knownBy, OptionTag, PolarityMark, SectionTitle } from "./bits";
 import { useRoomCtx } from "./room-context";
 
 export function VotePhase() {
@@ -69,7 +69,7 @@ export function VotePhase() {
       </section>
 
       <section aria-labelledby="facts-title">
-        <SectionTitle hint="The ledger as the team approved it, with who knew each fact and how much you said it matters.">
+        <SectionTitle hint="The ledger as the team approved it, with how many people knew each fact and how much you said it matters. Names come with the reveal.">
           <span id="facts-title">The facts on the table</span>
         </SectionTitle>
         <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${room.options.length}, minmax(0, 1fr))` }}>
@@ -88,10 +88,9 @@ export function VotePhase() {
                         <p className="flex-1 leading-snug">{c.text}</p>
                       </div>
                       <p className="mt-2 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-                        <span>Known by</span>
-                        {c.holders.map((h) => (
-                          <Who key={h.id} name={h.name} simulated={room.members.find((m) => m.id === h.id)?.simulated} className="font-medium text-foreground" />
-                        ))}
+                        <span>
+                          Known by <span className="font-medium text-foreground">{knownBy(c.mine, c.holderCount)}</span>
+                        </span>
                         <span className="ml-auto">You rated it {c.myRating ?? "-"}</span>
                       </p>
                     </li>

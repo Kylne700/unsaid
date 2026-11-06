@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 import type { DraftView, LedgerCardView } from "../../../server/domain/view";
-import { OptionTag, PolarityMark, SectionTitle, selectClass, Tag, Who } from "./bits";
+import { knownBy, OptionTag, PolarityMark, SectionTitle, selectClass, Tag } from "./bits";
 import { useRoomCtx } from "./room-context";
 
 type Polarity = "pro" | "con";
@@ -179,29 +179,27 @@ function NewDraft() {
 }
 
 function LedgerItem({ c, all }: { c: LedgerCardView; all: LedgerCardView[] }) {
-  const { room, run } = useRoomCtx();
-  const only = c.holders.length === 1;
-  const simulated = (id: string) => room.members.find((m) => m.id === id)?.simulated;
+  const { run } = useRoomCtx();
+  const only = c.holderCount === 1;
   const same = all.filter((o) => o.id !== c.id && o.option === c.option && o.polarity === c.polarity && (c.mine || o.mine));
   return (
-    <li className={cn("rounded-lg border bg-card p-3 text-sm", only && "border-amber-500/60")} data-testid="ledger-card" data-card-id={c.id} data-holders={c.holders.length}>
+    <li className={cn("rounded-lg border bg-card p-3 text-sm", only && "border-amber-500/60")} data-testid="ledger-card" data-card-id={c.id} data-holders={c.holderCount}>
       <div className="flex items-start gap-2">
         <PolarityMark polarity={c.polarity} />
         <p className="flex-1 leading-snug">{c.text}</p>
       </div>
       <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-        <span>Known by</span>
-        {c.holders.map((h) => (
-          <Who key={h.id} name={h.name} simulated={simulated(h.id)} className="font-medium text-foreground" />
-        ))}
-        {only ? <Tag className="border-amber-500/50 bg-amber-500/10 text-amber-800 dark:text-amber-200">only {c.holders[0]?.name} knew this</Tag> : null}
+        <span>
+          Known by <span className="font-medium text-foreground">{knownBy(c.mine, c.holderCount)}</span>
+        </span>
+        {only ? <Tag className="border-amber-500/50 bg-amber-500/10 text-amber-800 dark:text-amber-200">{c.mine ? "only you knew this" : "only one person knew this"}</Tag> : null}
       </p>
       {c.merged.length ? (
         <ul className="mt-2 space-y-1 border-l-2 pl-3 text-xs text-muted-foreground" aria-label="Merged wordings">
           {c.merged.map((m) => (
             <li key={m.id} className="flex items-start justify-between gap-2">
               <span>
-                Also worded: "{m.text}" ({m.holders.join(", ")})
+                Also worded: "{m.text}" (known by {knownBy(m.mine, m.holderCount)})
               </span>
               {c.mine ? (
                 <Button variant="ghost" size="xs" onClick={() => void run("unmerge-card", { cardId: c.id, absorbedId: m.id })}>
@@ -226,7 +224,8 @@ function LedgerItem({ c, all }: { c: LedgerCardView; all: LedgerCardView[] }) {
               <option value="">Same fact as...</option>
               {same.map((o) => (
                 <option key={o.id} value={o.id}>
-                  {truncate(o.text, 60)} ({o.holders.map((h) => h.name).join(", ")})
+                  {truncate(o.text, 60)}
+                  {o.mine ? " (yours)" : ""}
                 </option>
               ))}
             </select>
@@ -297,7 +296,7 @@ export function CardsPhase() {
       </section>
 
       <section aria-labelledby="ledger-title">
-        <SectionTitle hint="Everyone sees approved cards and who knew them. Same fact in different words? Merge the cards; Split undoes it.">
+        <SectionTitle hint="Everyone sees the approved cards and how many people knew each one, but not who. Same fact in other words? Merge the cards; Split undoes it.">
           <span id="ledger-title">Shared ledger</span>
         </SectionTitle>
         {ledger.length === 0 ? <p className="text-sm text-muted-foreground">No approved cards yet.</p> : null}

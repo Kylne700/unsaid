@@ -1,52 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { approveDraft, castVote, createPractice, createRoom, deleteDraft, forceAdvance, joinRoom, memberByToken, rateCard, saveDraft, saveNotes, setDone, setInitialPick } from "./room";
+import { approveDraft, castVote, createPractice, createRoom, deleteDraft, joinRoom, memberByToken, rateCard, saveDraft, setDone, setInitialPick } from "./room";
 import type { Member, Phase, Room } from "./types";
-import { expectSealed, must } from "./test-helpers";
+import { buildRoom as build, DRAFT, expectSealed, must, NOTES } from "./test-helpers";
 import { guestView, viewRoom, type RoomView } from "./view";
 
-const NOTES = { ana: "ANA-NOTES-SENTINEL Lisbon has cheap flights.", ben: "BEN-NOTES-SENTINEL Berlin rents are rising.", cy: "CY-NOTES-SENTINEL Oslo is dark in winter." };
-const DRAFT = { ana: "ANA-DRAFT-SENTINEL Lisbon is hilly.", ben: "BEN-DRAFT-SENTINEL Berlin is loud.", cy: "CY-DRAFT-SENTINEL Oslo is pricey." };
-
-/** A live room with three members, brought to `upTo` with the creator's force-advance. */
-function build(upTo: Phase) {
-  const made = createRoom({ code: "SEALT1", question: "Which city should we move to?", options: ["Lisbon", "Berlin", "Oslo"], creatorName: "Ana" });
-  const room: Room = made.room;
-  room.seed = "fixed-seed";
-  const ana = must(memberByToken(room, made.token));
-  const ben = must(memberByToken(room, joinRoom(room, "Ben").token));
-  const cy = must(memberByToken(room, joinRoom(room, "Cy").token));
-  saveNotes(room, ana, NOTES.ana);
-  saveNotes(room, ben, NOTES.ben);
-  saveNotes(room, cy, NOTES.cy);
-  setInitialPick(room, ana, "A");
-  setInitialPick(room, ben, "B");
-  setInitialPick(room, cy, "C");
-  const t = { room, ana, ben, cy, all: [ana, ben, cy] as Member[] };
-  if (upTo === "notes") return t;
-
-  forceAdvance(room, ana); // cards
-  const give = (m: Member, drafts: [string, string, "pro" | "con"][], keep: string) => {
-    for (const [text, option, polarity] of drafts) approveDraft(room, m, saveDraft(room, m, { text, option, polarity }).id);
-    saveDraft(room, m, { text: keep, option: null, polarity: null }); // stays a private draft
-  };
-  give(ana, [["Lisbon has cheap flights.", "A", "pro"], ["Lisbon summers are very hot.", "A", "con"], ["Oslo has great transit.", "C", "pro"]], DRAFT.ana);
-  give(ben, [["Berlin rents are rising.", "B", "con"], ["Berlin has a big tech scene.", "B", "pro"], ["Lisbon has a tiny office market.", "A", "con"]], DRAFT.ben);
-  give(cy, [["Oslo is dark in winter.", "C", "con"], ["Berlin nightlife is lively.", "B", "pro"]], DRAFT.cy);
-  if (upTo === "cards") return t;
-
-  forceAdvance(room, ana); // weigh
-  const rating = new Map<string, 1 | 2 | 3>([[ana.id, 2], [ben.id, 3], [cy.id, 1]]);
-  for (const m of t.all) for (const c of room.cards) rateCard(room, m, c.id, rating.get(m.id) ?? 0);
-  if (upTo === "weigh") return t;
-
-  forceAdvance(room, ana); // vote
-  if (upTo === "vote") return t;
-
-  castVote(room, ana, "A");
-  castVote(room, ben, "B");
-  castVote(room, cy, "C"); // last vote: the room reveals by itself
-  return t;
-}
 const asView = (room: Room, m: Member): RoomView => viewRoom(room, m);
 
 describe("the seal, phase by phase (view level)", () => {
@@ -96,12 +53,12 @@ describe("the seal, phase by phase (view level)", () => {
     expect(must(asView(t.room, t.ben).weigh).cards.every((c) => c.myRating === 3)).toBe(true);
   });
 
-  it("vote: the ledger returns (option and holders) with the caller's own ratings only", () => {
+  it("vote: the ledger returns (option, whether you hold it, how many hold it) with the caller's own ratings only", () => {
     const t = build("vote");
     const v = asView(t.room, t.ana);
     const ledger = must(v.ledger);
     expect(ledger).toHaveLength(8);
-    for (const c of ledger) expect(Object.keys(c).sort()).toEqual(["holders", "id", "merged", "mine", "myRating", "option", "polarity", "text"]);
+    for (const c of ledger) expect(Object.keys(c).sort()).toEqual(["holderCount", "id", "merged", "mine", "myRating", "option", "polarity", "text"]);
     expect(ledger.every((c) => c.myRating === 2)).toBe(true);
     expect(v.weigh).toBeNull();
   });
@@ -123,6 +80,59 @@ describe("the seal, phase by phase (view level)", () => {
     for (const m of t.all) asView(t.room, m);
     guestView(t.room, true);
     expect(JSON.stringify(t.room)).toBe(before);
+  });
+});
+
+/** The same room, but the two other members have traded every card they hold (nothing the viewer holds or counts changes). */
+function swapOthers(room: Room, a: Member, b: Member): Room {
+  const copy = JSON.parse(JSON.stringify(room)) as Room;
+  const swap = (ids: string[]) => ids.map((id) => (id === a.id ? b.id : id === b.id ? a.id : id));
+  for (const c of copy.cards) {
+    c.ownHolders = swap(c.ownHolders);
+    for (const p of c.absorbed) p.ownHolders = swap(p.ownHolders);
+  }
+  return copy;
+}
+
+describe("the ledger is anonymous until the reveal", () => {
+  const seats = (t: ReturnType<typeof build>) => [[t.ana, t.ben, t.cy], [t.ben, t.ana, t.cy], [t.cy, t.ana, t.ben]] as const;
+
+  it.each(["notes", "cards", "weigh", "vote"] as Phase[])("%s: if the other two members had held each other's cards, nobody's view would differ", (phase) => {
+    const t = build(phase, { merge: true });
+    for (const [viewer, a, b] of seats(t)) {
+      const swapped = swapOthers(t.room, a, b);
+      if (t.room.cards.length) expect(JSON.stringify(swapped.cards), `${phase}: the swap must change something`).not.toBe(JSON.stringify(t.room.cards));
+      const same = must(swapped.members.find((m) => m.id === viewer.id));
+      expect(JSON.stringify(viewRoom(swapped, same)), `${phase}/${viewer.name}`).toBe(JSON.stringify(viewRoom(t.room, viewer)));
+    }
+  });
+
+  it.each(["cards", "vote"] as Phase[])("%s: a ledger card or merged part names nobody and carries nobody's id", (phase) => {
+    const t = build(phase, { merge: true });
+    for (const m of t.all) {
+      const v = asView(t.room, m);
+      const { members: _members, me: _me, ...rest } = v;
+      for (const [label, json] of [["ledger", JSON.stringify(v.ledger)], ["rest of the view", JSON.stringify(rest)]] as const) {
+        for (const p of t.all) {
+          expect(json, `${phase}/${m.name}/${label}: name ${p.name}`).not.toMatch(new RegExp(`\\b${p.name}\\b`));
+          expect(json, `${phase}/${m.name}/${label}: id ${p.id}`).not.toContain(`"${p.id}"`);
+        }
+      }
+    }
+    // only the counts: Ben and Cy's merged card has two holders, its merged part one, and Ana is on neither
+    const merged = must(must(asView(t.room, t.ana).ledger).find((c) => c.merged.length));
+    expect([merged.mine, merged.holderCount, merged.merged[0]?.mine, merged.merged[0]?.holderCount]).toEqual([false, 2, false, 1]);
+    expect(must(must(asView(t.room, t.cy).ledger).find((c) => c.merged.length)).merged[0]).toMatchObject({ mine: true, holderCount: 1 });
+  });
+
+  it("vote: the list is shuffled so the order the cards were approved in tells nothing; the same for everyone, stable per poll", () => {
+    const t = build("vote");
+    const order = (m: Member) => must(asView(t.room, m).ledger).map((c) => c.id);
+    const approved = t.room.cards.map((c) => c.id);
+    expect(order(t.ana)).not.toEqual(approved);
+    expect([...order(t.ana)].sort()).toEqual([...approved].sort());
+    expect(order(t.ana)).toEqual(order(t.ana));
+    expect(order(t.ben)).toEqual(order(t.ana));
   });
 });
 

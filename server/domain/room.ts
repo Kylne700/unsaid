@@ -1,7 +1,7 @@
 // Room operations: the phase machine and everything a member can do. Pure functions over a Room document;
 // each takes the acting member and throws RoomError when the move is not allowed.
 import type { ExtractedCard } from "./extract-cards";
-import { holdersOf } from "./ledger";
+import { guessTarget, holdersOf } from "./ledger";
 import { buildPracticeRoom, practiceEnter } from "./practice";
 import { DEFAULT_SCENARIO_ID, getScenario } from "./scenario";
 import { addCardOrJoin, emptyRoom, MAX_MEMBERS, optionDefs, pushMember } from "./state";
@@ -206,11 +206,28 @@ export function rateCard(room: Room, me: Member, cardId: string, weight: number)
   if (!Number.isInteger(weight) || weight < 0 || weight > 3) throw new RoomError("Rate from 0 to 3.");
   (room.ratings[me.id] ??= {})[cardId] = weight as Weight;
 }
-export function castVote(room: Room, me: Member, optionId: string) {
+/** `expectSame` (optional): how many of the other members you expect to pick what you pick. Sealed with the vote. */
+export function castVote(room: Room, me: Member, optionId: string, expectSame?: number | undefined) {
   needPhase(room, "vote");
   if (!optionExists(room, optionId)) throw new RoomError("Unknown option.");
   if (room.votes[me.id]) throw new RoomError("Your vote is already sealed.", "conflict");
+  const others = room.members.length - 1;
+  if (expectSame !== undefined && (!Number.isInteger(expectSame) || expectSame < 0 || expectSame > others)) throw new RoomError(`Say a number from 0 to ${others}.`);
   room.votes[me.id] = optionId;
+  if (expectSame !== undefined) (room.aloneGuesses ??= {})[me.id] = expectSame;
   me.done = true;
   settle(room);
+}
+
+/**
+ * Vote phase: guess which member held a fact that exactly one other member held (null = "not sure", which is no guess).
+ * Editable until the reveal. Needs 3 members, so there is a real choice between at least two others.
+ */
+export function guessWho(room: Room, me: Member, cardId: string, candidateId: string | null) {
+  needPhase(room, "vote");
+  if (guessTarget(room, cardById(room, cardId), me.id) === null) throw new RoomError("You can only guess about a fact that exactly one other member knew, in a room of 3 or more.");
+  if (candidateId !== null && (candidateId === me.id || !room.members.some((m) => m.id === candidateId))) throw new RoomError("Unknown member.");
+  const mine = ((room.whoGuesses ??= {})[me.id] ??= {});
+  if (candidateId === null) delete mine[cardId];
+  else mine[cardId] = candidateId;
 }

@@ -88,7 +88,7 @@ export async function readView(args: { code?: string | undefined; token?: string
     const room = code ? await loadRoom(normalizeCode(code)) : null;
     if (!room) throw new RoomError("Room not found. Check the code.", "not_found");
     const me = w ? memberOf(room, w) : memberByToken(room, args.token);
-    return me ? viewRoom(room, me) : guestView(room, Boolean(args.token));
+    return me ? viewRoom(room, me, { agent: ctx?.caller === "tool" }) : guestView(room, Boolean(args.token));
   } catch (e) {
     return failFrom(e);
   }

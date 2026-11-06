@@ -76,4 +76,8 @@ export interface Room {
   cards: Card[];
   ratings: Record<string, Record<string, Weight>>;
   votes: Record<string, string>;
+  /** Vote phase, optional (older rooms have none): guesser id -> card id -> the member they say held it. "Not sure" has no entry. */
+  whoGuesses?: Record<string, Record<string, string>>;
+  /** Optional: member id -> how many of the other members they expected to pick their option (sent with the vote). */
+  aloneGuesses?: Record<string, number>;
 }

@@ -53,12 +53,12 @@ describe("the seal, phase by phase (view level)", () => {
     expect(must(asView(t.room, t.ben).weigh).cards.every((c) => c.myRating === 3)).toBe(true);
   });
 
-  it("vote: the ledger returns (option, whether you hold it, how many hold it) with the caller's own ratings only", () => {
+  it("vote: the ledger returns (option, whether you hold it, how many hold it) with the caller's own ratings and guesses only", () => {
     const t = build("vote");
     const v = asView(t.room, t.ana);
     const ledger = must(v.ledger);
     expect(ledger).toHaveLength(8);
-    for (const c of ledger) expect(Object.keys(c).sort()).toEqual(["holderCount", "id", "merged", "mine", "myRating", "option", "polarity", "text"]);
+    for (const c of ledger) expect(Object.keys(c).sort()).toEqual(["guessable", "holderCount", "id", "merged", "mine", "myGuess", "myRating", "option", "polarity", "text"]);
     expect(ledger.every((c) => c.myRating === 2)).toBe(true);
     expect(v.weigh).toBeNull();
   });

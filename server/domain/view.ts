@@ -1,7 +1,7 @@
 // The ONE redaction point. Every action that returns room data goes through viewRoom(), so the UI and the chat
 // agent get exactly the same answer for the same caller. What each phase may show is decided here and nowhere else.
 import { getScenario } from "./scenario";
-import { buildReveal, holdersOf, rank, type Ranking, type Scores, uniqueCount } from "./ledger";
+import { buildReveal, guessMeter, guessTarget, holdersOf, meterHiddenReason, rank, type Ranking, type Scores, uniqueCount, validGuesses, type Verdict } from "./ledger";
 import type { Absorbed, Card, Member, Phase, Polarity, Room } from "./types";
 import { mayNameOption, seededShuffle } from "./util";
 
@@ -54,6 +54,10 @@ export interface LedgerCardView {
   merged: { id: string; text: string; mine: boolean; holderCount: number }[];
   /** The caller's own rating, only once ratings exist (vote phase). */
   myRating: number | null;
+  /** Vote phase: exactly one other member knew this fact, so the caller may guess who. */
+  guessable: boolean;
+  /** The caller's own guess (a member id), vote phase only. Never in the chat agent's view. */
+  myGuess: string | null;
 }
 export interface WeighView {
   total: number;
@@ -82,6 +86,16 @@ export interface RevealView {
   cards: { id: string; option: string; polarity: Polarity; text: string; holders: string[]; weight: number; raters: number }[];
   uniqueCount: number;
   viewer: { id: string; initialPick: string | null; vote: string | null; ownTop: string[]; ownTied: boolean; fullTop: string[]; fullTied: boolean };
+  /** Null when no fact could be guessed (and for the chat agent in a practice room). Never anyone's own guesses, except the viewer's in practice. */
+  guessWho: GuessWhoView | null;
+  /** The viewer's own guess of how many others would vote like them, next to what happened. Null if they gave none (and for the chat agent). */
+  aloneCheck: { expected: number; actual: number; others: number } | null;
+}
+export interface GuessWhoView {
+  /** "room": everyone's guesses pooled into one number. "practice": only the viewer's own guesses. */
+  scope: "room" | "practice";
+  /** Null when a room-wide number would give away what one person guessed (see meterHiddenReason). Practice: null means the viewer made no guess. */
+  result: { guessers: number; guesses: number; right: number; rightPct: number; chancePct: number; verdict: Verdict } | null;
 }
 export interface RoomView {
   guest: false;
@@ -116,11 +130,14 @@ export function guestView(room: Room, tokenInvalid = false): GuestView {
   };
 }
 
-export function viewRoom(room: Room, me: Member): RoomView {
+/** `agent`: the view for the chat agent. Its tool output stays in the chat history, so it carries no guess of the member's. */
+export function viewRoom(room: Room, me: Member, opts: { agent?: boolean } = {}): RoomView {
   const myRatings = room.ratings[me.id] ?? {};
+  const myGuesses = opts.agent ? {} : (room.whoGuesses?.[me.id] ?? {});
   const phase = room.phase;
-  const ledgerCard = (c: Card, withRating: boolean): LedgerCardView => {
+  const ledgerCard = (c: Card, vote: boolean): LedgerCardView => {
     const holders = holdersOf(c);
+    const guessable = vote && guessTarget(room, c, me.id) !== null;
     return {
       id: c.id,
       option: c.option,
@@ -129,7 +146,9 @@ export function viewRoom(room: Room, me: Member): RoomView {
       mine: holders.includes(me.id),
       holderCount: holders.length,
       merged: c.absorbed.map((a: Absorbed) => ({ id: a.id, text: a.text, mine: a.ownHolders.includes(me.id), holderCount: a.ownHolders.length })),
-      myRating: withRating ? (myRatings[c.id] ?? null) : null,
+      myRating: vote ? (myRatings[c.id] ?? null) : null,
+      guessable,
+      myGuess: guessable ? (myGuesses[c.id] ?? null) : null,
     };
   };
 
@@ -175,11 +194,24 @@ export function viewRoom(room: Room, me: Member): RoomView {
       cards: order.map((id) => ({ id, neutral: (byId.get(id) as Card).neutral, myRating: myRatings[id] ?? null })),
     };
   }
-  if (phase === "reveal") view.reveal = revealView(room, me);
+  if (phase === "reveal") view.reveal = revealView(room, me, opts.agent === true);
   return view;
 }
 
-function revealView(room: Room, me: Member): RevealView {
+function guessWhoView(room: Room, me: Member, agent: boolean): GuessWhoView | null {
+  if (room.members.length < 3 || !room.cards.some((c) => holdersOf(c).length === 1)) return null;
+  const all = validGuesses(room);
+  if (room.practice) {
+    if (agent) return null;
+    const own = all.filter((g) => g.by === me.id);
+    return { scope: "practice", result: own.length ? { guessers: 1, guesses: own.length, ...pick(guessMeter(own)) } : null };
+  }
+  const m = guessMeter(all);
+  return { scope: "room", result: meterHiddenReason(m) ? null : { guessers: m.guessers, guesses: m.guesses, ...pick(m) } };
+}
+const pick = (m: ReturnType<typeof guessMeter>) => ({ right: m.right, rightPct: m.rightPct, chancePct: m.chancePct, verdict: m.verdict });
+
+function revealView(room: Room, me: Member, agent: boolean): RevealView {
   const nameOf = (id: string) => room.members.find((m) => m.id === id)?.name ?? "?";
   const rv = buildReveal(room);
   const top = (r: Ranking) => r.groups[0]?.options ?? [];
@@ -224,5 +256,14 @@ function revealView(room: Room, me: Member): RevealView {
       fullTop: top(rv.full.ranking),
       fullTied: rv.full.ranking.tiedFirst,
     },
+    guessWho: guessWhoView(room, me, agent),
+    aloneCheck: agent ? null : aloneCheckOf(room, me),
   };
+}
+
+function aloneCheckOf(room: Room, me: Member): RevealView["aloneCheck"] {
+  const expected = room.aloneGuesses?.[me.id];
+  const mine = room.votes[me.id];
+  if (expected === undefined || mine === undefined) return null;
+  return { expected, actual: room.members.filter((m) => m.id !== me.id && room.votes[m.id] === mine).length, others: room.members.length - 1 };
 }

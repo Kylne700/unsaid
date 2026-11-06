@@ -6,7 +6,7 @@ export default defineAction({
   description:
     "Read your room as you may see it: phase, members, and what this phase allows. " +
     "SEALED: before the reveal it never contains anyone's votes, initial picks or per-option scores; " +
-    "during the weigh phase it never shows a card's option; before the reveal it never says which member holds a card (only whether you do, and how many members do); a member's notes and draft cards go only to that member.",
+    "during the weigh phase it never shows a card's option; before the reveal it never says which member holds a card (only whether you do, and how many members do); a member's notes and draft cards go only to that member; their own guesses (who knew a fact, how many will vote the same) are never included for you.",
   // UI callers send the code and their token (no valid token: the join preview); the chat agent sends nothing.
   schema: z.object({ code: codeArg.optional(), token: z.string().max(100).optional().describe("The calling member's secret token") }),
   agentInputSchema: z.object({}),

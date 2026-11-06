@@ -10,6 +10,7 @@ import createPracticeRoom from "../../actions/create-practice-room";
 import createRoom from "../../actions/create-room";
 import extractCardsAction from "../../actions/extract-cards";
 import getRoom from "../../actions/get-room";
+import guessWho from "../../actions/guess-who";
 import joinRoom from "../../actions/join-room";
 import markDone from "../../actions/mark-done";
 import mergeCards from "../../actions/merge-cards";
@@ -97,7 +98,7 @@ describe("the module list: what the chat agent can and cannot call", () => {
   const byName = Object.fromEntries(Object.entries(mods).map(([p, m]) => [p.replace(/^.*\/([^/]+)\.ts$/, "$1"), m.default]));
   it("hides the member-only actions from the agent and keeps the rest", () => {
     const hidden = Object.keys(byName).filter((n) => byName[n]?.agentTool === false).sort();
-    expect(hidden).toEqual(["cast-vote", "create-practice-room", "create-room", "join-room", "rate-card", "set-initial-pick"]);
+    expect(hidden).toEqual(["cast-vote", "create-practice-room", "create-room", "guess-who", "join-room", "rate-card", "set-initial-pick"]);
     const visible = Object.keys(byName).filter((n) => byName[n]?.agentTool !== false).sort();
     expect(visible).toEqual(["advance-phase", "approve-draft", "delete-draft", "extract-cards", "get-room", "mark-done", "merge-cards", "navigate", "save-draft", "save-notes", "unmerge-card", "view-screen", "withdraw-card"]);
     // no action exists that votes or recommends for the team
@@ -301,3 +302,81 @@ describe("the chat agent acts only as the seat its run is bound to", () => {
     }
   });
 });
+
+describe("guess who and the alone check through the actions", () => {
+  /** A live room in the vote phase: Ana holds one card (Lisbon), Ben holds one (Berlin), Cy none. */
+  async function voteRoom() {
+    const r = await newRoom();
+    const guess = (token: string, args: { cardId: string; candidateId: string | null }, caller: ActionCaller = "frontend") => call(guessWho, { ...both(r.code, token), ...args }, caller);
+    for (const t of Object.values(r.who)) await call(markDone, { ...both(r.code, t), done: true }); // cards
+    for (const [token, text, option, polarity] of [[r.who.ana, "Lisbon has cheap flights.", "A", "pro"], [r.who.ben, "Berlin rents are rising.", "B", "con"]] as const) {
+      const made = await call(saveDraft, { ...both(r.code, token), text, option, polarity });
+      await call(approveDraft, { ...both(r.code, token), draftId: made.draftId });
+    }
+    const early = await guess(r.who.cy, { cardId: "c_x", candidateId: null }).catch((e) => e);
+    await call(advancePhase, both(r.code, r.who.ana)); // weigh
+    await call(advancePhase, both(r.code, r.who.ana)); // vote
+    const ids = { ana: ((await r.view(r.who.ana)).me as AnyView).id as string, ben: ((await r.view(r.who.ben)).me as AnyView).id as string, cy: ((await r.view(r.who.cy)).me as AnyView).id as string };
+    const cardOf = async (token: string, text: string) => must(((await r.view(token)).ledger as AnyView[]).find((c) => c.text === text)).id as string;
+    return { ...r, guess, ids, early, lisbon: await cardOf(r.who.cy, "Lisbon has cheap flights."), berlin: await cardOf(r.who.cy, "Berlin rents are rising.") };
+  }
+
+  it("refuses the agent and every other non-UI caller, and the wrong phase, cards and members", async () => {
+    const r = await voteRoom();
+    expect(r.early).toMatchObject({ errorCode: "bad_phase" });
+    const notUi = ALL_CALLERS.filter((c) => c !== "http" && c !== "frontend");
+    for (const caller of notUi) await expect(r.guess(r.who.cy, { cardId: r.lisbon, candidateId: r.ids.ana }, caller), caller).rejects.toMatchObject({ errorCode: "own_judgment_only", statusCode: 403 });
+    await expect(agent(r.code, r.who.cy, guessWho, { cardId: r.lisbon, candidateId: r.ids.ana })).rejects.toMatchObject({ errorCode: "own_judgment_only" }); // inside its own seat too
+    await expect(r.guess(r.who.cy, { cardId: "c_nope", candidateId: r.ids.ana })).rejects.toMatchObject({ errorCode: "not_found" });
+    await expect(r.guess(r.who.cy, { cardId: r.lisbon, candidateId: "m9" })).rejects.toMatchObject({ errorCode: "invalid" });
+    await expect(r.guess(r.who.cy, { cardId: r.lisbon, candidateId: r.ids.cy })).rejects.toMatchObject({ errorCode: "invalid" }); // not yourself
+    await expect(r.guess(r.who.ana, { cardId: r.lisbon, candidateId: r.ids.ben })).rejects.toMatchObject({ errorCode: "invalid" }); // your own card
+    await expect(call(guessWho, { code: r.code, cardId: r.lisbon, candidateId: r.ids.ana })).rejects.toMatchObject({ errorCode: "forbidden" }); // no token
+    await expect(r.guess("not-a-real-token-1234567890", { cardId: r.lisbon, candidateId: r.ids.ana })).rejects.toMatchObject({ errorCode: "forbidden" });
+    expect(String(await docOfRoom(r.code))).not.toContain("whoGuesses"); // nothing was stored by any refused call
+  });
+
+  it("keeps a member's guess in that member's own view only, never in the agent's", async () => {
+    const r = await voteRoom();
+    const [ana0, ben0] = [JSON.stringify(await r.view(r.who.ana)), JSON.stringify(await r.view(r.who.ben))];
+    await r.guess(r.who.cy, { cardId: r.lisbon, candidateId: r.ids.ben }, "http"); // wrong on purpose
+    await r.guess(r.who.cy, { cardId: r.berlin, candidateId: r.ids.ben }, "frontend");
+    const mine = (await r.view(r.who.cy)).ledger as AnyView[];
+    expect(mine.map((c) => [c.text, c.guessable, c.myGuess])).toEqual(expect.arrayContaining([["Lisbon has cheap flights.", true, r.ids.ben], ["Berlin rents are rising.", true, r.ids.ben]]));
+    const theirs = (await r.view(r.who.cy, "tool")).ledger as AnyView[];
+    expect(theirs.map((c) => c.myGuess)).toEqual([null, null]);
+    expect(theirs.map((c) => c.guessable)).toEqual([true, true]);
+    // Ana and Ben see exactly what they saw before, from the UI and from the agent
+    expect(JSON.stringify(await r.view(r.who.ana))).toBe(ana0);
+    expect(JSON.stringify(await r.view(r.who.ben))).toBe(ben0);
+    expect(JSON.stringify(await r.view(r.who.ana, "tool"))).toBe(ana0);
+    // Ana's own card is not hers to guess; Ben's is
+    expect(((await r.view(r.who.ana)).ledger as AnyView[]).map((c) => [c.text, c.guessable])).toEqual(expect.arrayContaining([["Lisbon has cheap flights.", false], ["Berlin rents are rising.", true]]));
+    await r.guess(r.who.cy, { cardId: r.lisbon, candidateId: null }); // not sure takes it back
+    expect(((await r.view(r.who.cy)).ledger as AnyView[]).find((c) => c.id === r.lisbon)?.myGuess).toBeNull();
+  });
+
+  it("seals the alone-check number with the vote, refuses a bad one, and shows each member only their own at the reveal", async () => {
+    const r = await voteRoom();
+    await expect(call(castVote, { ...both(r.code, r.who.ana), optionId: "A", expectSame: 3 }, "frontend")).rejects.toMatchObject({ errorCode: "invalid", message: expect.stringContaining("0 to 2") });
+    await expect(call(castVote, { ...both(r.code, r.who.ana), optionId: "A", expectSame: 1.5 }, "frontend")).rejects.toBeDefined();
+    expect(((await r.view(r.who.ana)).me as AnyView).hasVoted).toBe(false); // the refused vote sealed nothing
+    await call(castVote, { ...both(r.code, r.who.ana), optionId: "A", expectSame: 2 }, "frontend");
+    await call(castVote, { ...both(r.code, r.who.ben), optionId: "A" }, "http"); // no guess given
+    const sealed = JSON.stringify(await r.view(r.who.cy));
+    expect(sealed).not.toMatch(/expectSame|aloneGuesses|aloneCheck/);
+    await call(castVote, { ...both(r.code, r.who.cy), optionId: "C", expectSame: 0 }, "frontend");
+    const ana = (await r.view(r.who.ana)).reveal as AnyView;
+    expect(ana.aloneCheck).toEqual({ expected: 2, actual: 1, others: 2 }); // only Ben voted A too
+    expect(((await r.view(r.who.ben)).reveal as AnyView).aloneCheck).toBeNull();
+    expect(((await r.view(r.who.cy)).reveal as AnyView).aloneCheck).toEqual({ expected: 0, actual: 0, others: 2 });
+    expect(JSON.stringify(await r.view(r.who.cy))).not.toMatch(/aloneGuesses|expectSame/);
+    expect(((await r.view(r.who.ana, "tool")).reveal as AnyView).aloneCheck).toBeNull(); // not in the chat
+    expect(ana.guessWho).toEqual({ scope: "room", result: null }); // nobody guessed
+    await expect(r.guess(r.who.cy, { cardId: r.lisbon, candidateId: r.ids.ana })).rejects.toMatchObject({ errorCode: "bad_phase" }); // locked
+  });
+});
+
+async function docOfRoom(code: string) {
+  return (await getDbExec().execute({ sql: "SELECT doc FROM unsaid_rooms WHERE code = ?", args: [code] })).rows[0]?.doc;
+}

@@ -117,3 +117,70 @@ export function buildReveal(room: Room): Reveal {
   }
   return { cards, uniqueCount: uniqueCount(room.cards), full, shared, members, changed, moved };
 }
+
+// ---- the guess-who meter ------------------------------------------------------------------------
+
+/** One valid guess: who made it, whether it named the real holder, and how many members it chose between. */
+export interface Guess {
+  by: string;
+  right: boolean;
+  candidates: number;
+}
+export type Verdict = "above" | "near" | "below";
+export interface GuessMeter {
+  guessers: number;
+  guesses: number;
+  right: number;
+  rightPct: number;
+  /** What luck alone would give: the mean of 1/candidates over the guesses. */
+  chancePct: number;
+  /** Rough, not a significance test: more than 2 standard deviations above (or below) luck, else near it. */
+  verdict: Verdict;
+}
+/** A room-wide number from fewer guessers than this would let a guesser work out what the others guessed. */
+export const MIN_GUESSERS = 3;
+
+export function guessMeter(guesses: Guess[]): GuessMeter {
+  const n = guesses.length;
+  const right = guesses.filter((g) => g.right).length;
+  const p = guesses.map((g) => 1 / g.candidates);
+  const expected = p.reduce((a, b) => a + b, 0);
+  const sd = Math.sqrt(p.reduce((a, b) => a + b * (1 - b), 0));
+  const z = sd > 0 ? (right - expected) / sd : 0;
+  return {
+    guessers: new Set(guesses.map((g) => g.by)).size,
+    guesses: n,
+    right,
+    rightPct: n ? Math.round((100 * right) / n) : 0,
+    chancePct: n ? Math.round((100 * expected) / n) : 0,
+    verdict: z >= 2 ? "above" : z <= -2 ? "below" : "near",
+  };
+}
+/** Why the room-wide number must stay hidden (it would show what individuals guessed), or null if it may be shown. */
+export function meterHiddenReason(m: GuessMeter): "few" | "none" | "all" | null {
+  if (m.guessers < MIN_GUESSERS) return "few";
+  if (m.right === 0) return "none";
+  if (m.right === m.guesses) return "all";
+  return null;
+}
+
+/** The one member who held this card, if `guesserId` may guess who it was: exactly one other member held it, in a room of 3 or more. */
+export function guessTarget(room: Room, card: Card, guesserId: string): string | null {
+  const holders = holdersOf(card);
+  return room.members.length >= 3 && holders.length === 1 && holders[0] !== guesserId ? (holders[0] as string) : null;
+}
+
+/** Every guess in the room that still makes sense: a real guesser, a card they may guess about, another member named. */
+export function validGuesses(room: Room): Guess[] {
+  const out: Guess[] = [];
+  for (const [by, mine] of Object.entries(room.whoGuesses ?? {})) {
+    if (!room.members.some((m) => m.id === by && !m.simulated)) continue;
+    for (const [cardId, named] of Object.entries(mine)) {
+      const card = room.cards.find((c) => c.id === cardId);
+      const holder = card ? guessTarget(room, card, by) : null;
+      if (holder === null || named === by || !room.members.some((m) => m.id === named)) continue;
+      out.push({ by, right: holder === named, candidates: room.members.length - 1 });
+    }
+  }
+  return out;
+}

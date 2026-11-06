@@ -246,12 +246,28 @@ describe("merging a duplicate in the weigh phase", () => {
     expect(t.room.cards).toHaveLength(3);
   });
 
-  it("only a card the caller holds can be folded away", () => {
+  it("only a card the caller wrote can be folded away", () => {
     const t = weighRoom();
     throwsKind(() => mergeCards(t.room, t.ana, t.x.id, t.y.id), "forbidden"); // Ana would absorb Ben's card
     throwsKind(() => mergeCards(t.room, t.cy, t.x.id, t.y.id), "forbidden"); // Cy holds neither
     throwsKind(() => mergeCards(t.room, t.cy, t.y.id, t.x.id), "forbidden");
     expect(t.room.cards).toHaveLength(4);
+  });
+
+  it("joining a card does not make it yours to fold away: after Ben joins Ana's card he cannot move it, Ana can", () => {
+    const t = live();
+    forceAdvance(t.room, t.ana);
+    const x = card(t.room, t.ana, "Lisbon flights are cheap.", "A", "pro");
+    const y = card(t.room, t.ben, "Cheap flights to Lisbon.", "A", "pro");
+    const w = card(t.room, t.cy, "Flights to Lisbon cost little.", "A", "pro"); // same option and side, so only the author check can stop it
+    forceAdvance(t.room, t.ana);
+    mergeCards(t.room, t.ben, x.id, y.id); // Ben now holds x
+    expect(holdersOf(x)).toContain(t.ben.id);
+    throwsKind(() => mergeCards(t.room, t.ben, w.id, x.id), "forbidden");
+    expect(t.room.cards.map((c) => c.id)).toEqual([x.id, w.id]);
+    expect(holdersOf(x).sort()).toEqual([t.ana.id, t.ben.id].sort());
+    mergeCards(t.room, t.ana, w.id, x.id); // her own wording: allowed, and Ben's part travels with it
+    expect(holdersOf(w).sort()).toEqual(all(t).map((m) => m.id).sort());
   });
 
   it("the folded card's own merged parts travel with it", () => {

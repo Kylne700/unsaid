@@ -323,9 +323,19 @@ try {
   const marks2 = await Promise.all([A, B, C].map(yoursIn));
   const offers2 = await Promise.all([A, B, C].map(offeredIn));
   check(
-    "weigh: after the merge Ben's window marks the kept card 'Yours' too (Ana 2, Ben 2, Cleo 1) and offers 'Same as mine' on 2, 2 and 3 cards",
-    marks2.join() === "2,2,1" && offers2.join() === "2,2,3",
+    "weigh: after the merge the kept card is still Ana's wording: only she has it as 'Yours' (Ana 2, Ben 1, Cleo 1), 'Same as mine' is offered on 2, 3 and 3 cards",
+    marks2.join() === "2,1,1" && offers2.join() === "2,3,3",
     `yours ${marks2.join(", ")}; offered ${offers2.join(", ")}`,
+  );
+  // Ben now holds Ana's card but did not write it. Cleo's matte-screen card has the same option and side, so only the
+  // own-card rule can stop him from folding Ana's card into it. Called from node: an expected 403 is not a page problem.
+  const benList = after[1].weigh.cards;
+  const chain = await act(B, "merge-cards", { keepId: benList.find((c) => c.neutral.includes("matte")).id, absorbId: benList.find((c) => c.neutral.includes(DAYS_A)).id });
+  const stillFour = await Promise.all([A, B, C].map(async (pg) => JSON.parse(await raw(pg, code)).weigh.cards.length));
+  check(
+    "weigh: joining Ana's card does not make it Ben's to move: the action refuses him (403) and nothing changes",
+    chain.status === 403 && stillFour.every((n) => n === 4),
+    `${chain.status}; cards ${stillFour.join(", ")}`,
   );
   const textsAfter = await weighTexts();
   const mains = await Promise.all([A, C].map((pg) => pg.locator("main").innerText()));

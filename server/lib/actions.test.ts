@@ -189,9 +189,15 @@ describe("get-room gives every caller the same sealed view", () => {
     const merged = await weighCards(r.who.ana);
     expect(merged).toHaveLength(4);
     expect(((await r.view(r.who.ana)).weigh as AnyView).total).toBe(4);
-    for (const [name, t, mine] of [["Ana", r.who.ana, 1], ["Ben", r.who.ben, 2], ["Cy", r.who.cy, 2]] as const) {
+    // Cy joined Ana's card by folding hers into it; that does not make it hers to move, on the screen or through her agent.
+    const other = must(merged.find((c) => c.id !== anaOwn.id));
+    const chain = { keepId: other.id, absorbId: anaOwn.id };
+    await expect(call(mergeCards, { ...both(r.code, r.who.cy), ...chain })).rejects.toMatchObject({ errorCode: "forbidden", statusCode: 403 });
+    await expect(agent(r.code, r.who.cy, mergeCards, chain)).rejects.toMatchObject({ errorCode: "forbidden", statusCode: 403 });
+    expect(await weighCards(r.who.ana)).toHaveLength(4);
+    for (const [name, t, mine] of [["Ana", r.who.ana, 1], ["Ben", r.who.ben, 2], ["Cy", r.who.cy, 1]] as const) {
       const cardsOfMember = await weighCards(t);
-      expect(cardsOfMember.filter((c) => c.mine), `${name}: cards flagged mine`).toHaveLength(mine); // Cy now holds the merged card as well as the Oslo one
+      expect(cardsOfMember.filter((c) => c.mine), `${name}: cards flagged mine`).toHaveLength(mine); // Cy wrote only the Oslo card: the merged card is Ana's wording, which Cy joined
       expect(JSON.stringify(cardsOfMember)).not.toMatch(/Lisbon|Berlin|Oslo|"holders"|"option"|"by"|merged|absorbed/);
     }
     await expect(call(markDone, { ...both(r.code, r.who.ana), done: true })).rejects.toMatchObject({ errorCode: "invalid", message: expect.stringContaining("Rate every card") });

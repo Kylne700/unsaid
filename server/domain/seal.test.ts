@@ -48,14 +48,14 @@ describe("the seal, phase by phase (view level)", () => {
     expect([...order(t.ana)].sort()).toEqual([...order(t.ben)].sort());
   });
 
-  it("weigh: `mine` marks the cards the caller holds; a merge in weigh adds no holder count and names nobody", () => {
+  it("weigh: `mine` marks the cards the caller wrote; a merge in weigh adds no holder count and names nobody", () => {
     const t = build("weigh", { merge: true });
     expect(must(asView(t.room, t.ana).weigh).total).toBe(7);
     const mineCount = (m: Member) => must(asView(t.room, m).weigh).cards.filter((c) => c.mine).length;
-    expect(t.all.map(mineCount)).toEqual([3, 3, 2]); // the merged card is Ben's and Cy's
+    expect(t.all.map(mineCount)).toEqual([3, 3, 1]); // the merged card is Ben's wording that Cy joined: still not hers to move
     for (const m of t.all) {
       const weigh = must(asView(t.room, m).weigh);
-      for (const c of weigh.cards) expect(c.mine, `${m.name}/${c.id}`).toBe(holdersOf(must(t.room.cards.find((x) => x.id === c.id))).includes(m.id));
+      for (const c of weigh.cards) expect(c.mine, `${m.name}/${c.id}`).toBe(must(t.room.cards.find((x) => x.id === c.id)).ownHolders.includes(m.id));
       const keys = keysDeep(weigh);
       for (const k of ["by", "absorbed", "merged", "ownHolders", "holders", "holderCount"]) expect(keys.has(k), `${m.name}: key ${k}`).toBe(false);
     }

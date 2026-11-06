@@ -176,7 +176,8 @@ export function withdrawCard(room: Room, me: Member, cardId: string) {
 }
 
 /**
- * Two cards that state the same fact become one card whose holders are the union. You can only absorb a card you hold.
+ * Two cards that state the same fact become one card whose holders are the union. You can only absorb a card you wrote
+ * (`ownHolders`): a card you joined by folding yours into it is someone else's wording and stays theirs to move.
  * Cards phase: both cards must be yours (a live room shows you nobody else's cards there). Weigh phase: the card you keep
  * may be anyone's, which is the one way to join a duplicate of someone else's fact once the ledger is on the table; the
  * cards carry no names there and nothing shows who merged. The weight members gave the absorbed card moves to the kept one.
@@ -187,7 +188,7 @@ export function mergeCards(room: Room, me: Member, keepId: string, absorbId: str
   if (keepId === absorbId) throw new RoomError("Pick two different cards.");
   const keep = cardById(room, keepId);
   const gone = cardById(room, absorbId);
-  if (!holdersOf(gone).includes(me.id)) throw new RoomError("You can only merge one of your own cards into another card.", "forbidden");
+  if (!gone.ownHolders.includes(me.id)) throw new RoomError("You can only merge one of your own cards into another card.", "forbidden");
   if (room.phase === "cards" && !holdersOf(keep).includes(me.id)) throw new RoomError("Before the weigh phase you can only merge your own cards.", "bad_phase");
   if (keep.option !== gone.option || keep.polarity !== gone.polarity) throw new RoomError("Cards about different options, or a pro and a con, are not the same fact.", "conflict");
   const part: Absorbed = { id: gone.id, text: gone.text, neutral: gone.neutral, ownHolders: gone.ownHolders, factKey: gone.factKey, by: me.id };

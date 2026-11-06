@@ -1,8 +1,9 @@
 // Three people in one live room, each in their own fresh headless Chromium profile (own cookies and
-// localStorage, 127.0.0.1 only). Checks live sync (no reload), force-advance, auto-advance, merge/split,
-// the private-draft rule, the cards-phase rule (your own cards in full, only a number for everyone else's)
-// and the seal over the raw HTTP actions, then guess who and the alone check (nobody
-// else's guess reaches another window), and the reveal in all three windows.
+// localStorage, 127.0.0.1 only). Checks live sync (no reload), force-advance, auto-advance, the private-draft
+// rule, the cards-phase rule (your own cards in full, only a number for everyone else's; no merge across
+// people yet) and the seal over the raw HTTP actions, then the weigh phase, where two people who wrote the
+// same fact merge it by hand ("Same as mine": ratings move, nobody is shown who merged), then guess who and
+// the alone check (nobody else's guess reaches another window), and the reveal in all three windows.
 // Run: node scripts/e2e/live.mjs --pw-core=<path to playwright-core/index.mjs>   (dev server on http://127.0.0.1:18744, or --base=...)
 import { mkdirSync } from "node:fs";
 import path from "node:path";
@@ -204,35 +205,27 @@ try {
   await snapBoth(A, "11-live-ana-cards");
   await snapBoth(C, "14-live-cleo-cards");
 
-  // ---- merge, split, merge: the counter follows in the other window ---------------------------
-  // TEST ONLY. The screen no longer offers another person's card to merge with, so this pair is merged through the action
-  // itself, each card id read from its owner's own page. The server still merges across people; no screen and no chat
-  // agent reaches that any more (research/97, first item).
-  const act = (page, name, body) =>
-    page.evaluate(
-      async ([c, n, b]) => {
-        const token = window.localStorage.getItem(`unsaid:member:${c}`);
-        const r = await fetch(`/_agent-native/actions/${n}`, { method: "POST", headers: { "content-type": "application/json", "x-agent-native-frontend": "1" }, body: JSON.stringify({ code: c, token, ...b }) });
-        return { status: r.status, text: await r.text() };
-      },
-      [code, name, body],
-    );
+  // ---- no merge across people yet: every card is still private ------------------------------------
+  // Another person's card is on nobody's screen in this phase, and the server refuses it too. TEST ONLY: each card id is
+  // read from its owner's own page and the action is called straight from node, so an expected 403 is not counted as a
+  // guest-path problem. Duplicates between people are merged in the weigh phase.
+  const act = async (page, name, body) => {
+    const token = await page.evaluate((c) => window.localStorage.getItem(`unsaid:member:${c}`), code);
+    const r = await fetch(`${BASE}/_agent-native/actions/${name}`, { method: "POST", headers: { "content-type": "application/json", "x-agent-native-frontend": "1" }, body: JSON.stringify({ code, token, ...body }) });
+    return { status: r.status, text: await r.text() };
+  };
   const cardOf = (page, text) => page.getByTestId("ledger-card").filter({ has: page.getByText(text, { exact: true }) });
-  const keepId = await cardOf(B, BEN[0]).getAttribute("data-card-id");
-  const absorbId = await cardOf(A, ANA[0]).getAttribute("data-card-id");
-  const merged = await act(B, "merge-cards", { keepId, absorbId });
-  check("cards: test only: the merge action still joins Ben's card and Ana's across two people", merged.status === 200, `${merged.status} ${merged.text.slice(0, 80)}`);
-  live("Ben's and Ana's wordings of one fact are merged and Ana's counter drops from 5 to 3", await took(A, uniqueIs, 3));
-  await C.waitForFunction(othersAre, 3, { timeout: 8000 }); // the pair is one card now: Cleo's number goes 4 -> 3
-  const [aMerged, bMerged, cMerged] = await Promise.all([A, B, C].map((pg) => pg.locator("body").innerText()));
+  const benCard = await cardOf(B, BEN[0]).getAttribute("data-card-id");
+  const anaCard = await cardOf(A, ANA[0]).getAttribute("data-card-id");
+  const takeHers = await act(B, "merge-cards", { keepId: benCard, absorbId: anaCard }); // absorbs a card Ben does not hold
+  const foldHis = await act(B, "merge-cards", { keepId: anaCard, absorbId: benCard }); // folds his card into hers, before weigh
+  const uniqueOf = async (pg) => JSON.parse(await raw(pg, code)).uniqueCount;
+  const stays = await Promise.all([A, B, C].map(uniqueOf));
   check(
-    "cards: after the merge Ana and Ben both see both wordings; Cleo sees only that her number dropped to 3",
-    [aMerged, bMerged].every((t) => t.includes(ANA[0]) && t.includes(BEN[0])) && !cMerged.includes(ANA[0]) && !cMerged.includes(BEN[0]),
+    "cards: the action refuses a merge across two people, whichever card is kept (403, 409), and the counter stays at 5",
+    takeHers.status === 403 && foldHis.status === 409 && stays.every((n) => n === 5),
+    `${takeHers.status}, ${foldHis.status}; counters ${stays.join(", ")}`,
   );
-  await cardOf(B, BEN[0]).getByRole("button", { name: "Split" }).click();
-  live("Ben undoes the merge and Ana's counter is back at 5", await took(A, uniqueIs, 5));
-  await act(B, "merge-cards", { keepId, absorbId });
-  await A.waitForFunction(uniqueIs, 3, { timeout: 8000 });
 
   // ---- both done: the room moves on by itself -------------------------------------------------
   await A.getByRole("button", { name: "I'm done", exact: true }).click();
@@ -245,16 +238,111 @@ try {
   check("auto-advance: the room reached 'weigh' in all three windows when the last person was done", true);
 
   // ---- weigh: blind, checked over the raw action too ------------------------------------------
-  const weighA = (await A.getByTestId("weigh-card").allInnerTexts()).join("\n");
-  const weighB = (await B.getByTestId("weigh-card").allInnerTexts()).join("\n");
-  const weighC = (await C.getByTestId("weigh-card").allInnerTexts()).join("\n");
-  const leaked = ["Zeta", "Omega", "Known by", "Ana", "Ben", "Cleo"].filter((w) => weighA.includes(w) || weighB.includes(w) || weighC.includes(w));
+  const weighTexts = () => Promise.all([A, B, C].map(async (pg) => (await pg.getByTestId("weigh-card").allInnerTexts()).join("\n")));
+  const leakIn = (texts) => ["Zeta", "Omega", "Known by", "Ana", "Ben", "Cleo"].filter((w) => texts.some((t) => t.includes(w)));
+  const leaked = leakIn(await weighTexts());
   check("weigh: cards show neither an option name nor a person", leaked.length === 0, leaked.join(", "));
   const weighRaw = JSON.parse(await raw(B, code));
   const bad = ["holders", "option", "polarity", "initialPick", "initialPicks", "vote", "votes", "scores", "ranking", "weights", "fullScore", "text"].filter((k) => keysDeep(weighRaw).has(k));
   check("weigh: the raw get-room data carries no option, holders, votes or scores", bad.length === 0, bad.join(", ") || `keys: ${[...keysDeep(weighRaw)].sort().join(",")}`);
   const benWeigh = await B.getByTestId("weigh-card").count();
-  check("weigh: control: Ben, who had only his own 2 cards in the cards phase, now gets all 4 cards of the ledger", benWeigh === 4, `${benWeigh} cards`);
+  check("weigh: control: Ben, who had only his own 2 cards in the cards phase, now gets all 5 cards of the ledger", benWeigh === 5, `${benWeigh} cards`);
+  const weighCard = (page, snippet) => page.getByTestId("weigh-card").filter({ hasText: snippet });
+  const yoursIn = (pg) => pg.getByTestId("weigh-card").getByText("Yours", { exact: true }).count();
+  const offeredIn = (pg) => pg.getByTestId("same-as-mine").count();
+  const marks = await Promise.all([A, B, C].map(yoursIn));
+  const offers = await Promise.all([A, B, C].map(offeredIn));
+  check(
+    "weigh: each window marks its own person's cards 'Yours' (2, 2, 1) and offers 'Same as mine' on all the others (3, 3, 4)",
+    marks.join() === "2,2,1" && offers.join() === "3,3,4",
+    `yours ${marks.join(", ")}; offered ${offers.join(", ")}`,
+  );
+
+  // A card can be folded away only by someone who holds it, and only into a card about the same option and side.
+  // Cleo holds one card (Zeta, a pro); Ana's "screen" card is about Omega. Card ids are in the weigh data.
+  const cleoCards = JSON.parse(await raw(C, code)).weigh.cards;
+  const cleoOwn = cleoCards.find((c) => c.mine);
+  const anaScreen = cleoCards.find((c) => c.neutral.includes("screen is far brighter"));
+  const takeScreen = await act(C, "merge-cards", { keepId: cleoOwn.id, absorbId: anaScreen.id }); // absorbs a card she does not hold
+  check("weigh: the action refuses to absorb a card the caller does not hold (403) and changes nothing", takeScreen.status === 403 && (await uniqueOf(C)) === 5, `${takeScreen.status}; counter ${await uniqueOf(C)}`);
+  await weighCard(C, "screen is far brighter").getByTestId("same-as-mine").click();
+  await C.getByTestId("same-as-mine-merge").click(); // her Zeta card as "the same fact" as an Omega card
+  await C.getByTestId("same-as-mine-refused").waitFor({ timeout: 8000 });
+  const why = await C.getByTestId("same-as-mine-refused").innerText();
+  check(
+    "weigh: Cleo offers her Zeta card as the same fact as an Omega card: the panel says why it was refused and nothing changes",
+    /different options/.test(why) && (await C.getByTestId("weigh-card").count()) === 5 && (await uniqueOf(C)) === 5,
+    why,
+  );
+  await C.getByTestId("same-as-mine-panel").getByRole("button", { name: "Cancel" }).click();
+
+  // Ana and Ben wrote the same fact. Ratings given before the merge show how they move: Cleo rated only Ben's wording,
+  // Ana rated both, Ben only his own.
+  const DAYS_A = "two days on a charge"; // Ana's wording: the card that stays
+  const DAYS_B = "two full days"; // Ben's wording: the card that is folded into it
+  const rateOne = (pg, snippet, weight) => weighCard(pg, snippet).getByRole("radio", { name: new RegExp(`^${weight},`) }).click();
+  const savedRating = async (pg, snippet) => JSON.parse(await raw(pg, code)).weigh.cards.find((c) => c.neutral.includes(snippet))?.myRating ?? null;
+  const ratingSaved = async (pg, snippet, want) => {
+    for (let i = 0; i < 40 && (await savedRating(pg, snippet)) !== want; i++) await pg.waitForTimeout(150);
+    return (await savedRating(pg, snippet)) === want;
+  };
+  await rateOne(C, DAYS_B, 3);
+  await rateOne(A, DAYS_A, 3);
+  await rateOne(A, DAYS_B, 1);
+  await rateOne(B, DAYS_B, 2);
+  const saved = [await ratingSaved(C, DAYS_B, 3), await ratingSaved(A, DAYS_A, 3), await ratingSaved(A, DAYS_B, 1), await ratingSaved(B, DAYS_B, 2)];
+  check("weigh: the ratings given before the merge are stored (Cleo 3 on Ben's wording; Ana 3 on hers, 1 on Ben's; Ben 2 on his own)", saved.every(Boolean), saved.join(", "));
+
+  // Ben marks his own card as the same fact as Ana's: his is folded into hers.
+  const preA = JSON.parse(await raw(A, code));
+  const preC = JSON.parse(await raw(C, code));
+  await weighCard(B, DAYS_A).getByTestId("same-as-mine").click();
+  const pick = B.getByTestId("same-as-mine-pick");
+  await pick.selectOption(await pick.locator("option", { hasText: DAYS_B }).getAttribute("value"));
+  await snapBoth(B, "23-live-ben-same-as-mine");
+  const cardsAre = (n) => document.querySelectorAll('[data-testid="weigh-card"]').length === n;
+  const mergedAt = Date.now();
+  await B.getByTestId("same-as-mine-merge").click();
+  await A.waitForFunction(cardsAre, 4, { timeout: 8000 });
+  live("Ben folds his card into Ana's and Ana's window drops from 5 to 4 cards", Date.now() - mergedAt);
+  await B.waitForFunction(cardsAre, 4, { timeout: 8000 });
+  await C.waitForFunction(cardsAre, 4, { timeout: 8000 });
+  await snapBoth(B, "24-live-ben-weigh-merged");
+  const after = await Promise.all([A, B, C].map(async (pg) => JSON.parse(await raw(pg, code))));
+  check(
+    "weigh: the merge is on the server: 4 cards, and 3 facts only one of you knew, in all three windows' data",
+    after.every((v) => v.weigh.cards.length === 4 && v.uniqueCount === 3),
+    after.map((v) => `${v.weigh.cards.length} cards, ${v.uniqueCount} unique`).join(" | "),
+  );
+  const kept = await Promise.all([A, B, C].map((pg) => weighCard(pg, DAYS_A).getAttribute("data-rated")));
+  check(
+    "weigh: ratings follow the merge: Ana keeps her own 3 (not the 1 she gave Ben's wording), Ben's 2 and Cleo's 3 move onto the card that stays",
+    kept.join() === "3,2,3",
+    `on the kept card: Ana ${kept[0]}, Ben ${kept[1]}, Cleo ${kept[2]}`,
+  );
+  const marks2 = await Promise.all([A, B, C].map(yoursIn));
+  const offers2 = await Promise.all([A, B, C].map(offeredIn));
+  check(
+    "weigh: after the merge Ben's window marks the kept card 'Yours' too (Ana 2, Ben 2, Cleo 1) and offers 'Same as mine' on 2, 2 and 3 cards",
+    marks2.join() === "2,2,1" && offers2.join() === "2,2,3",
+    `yours ${marks2.join(", ")}; offered ${offers2.join(", ")}`,
+  );
+  const textsAfter = await weighTexts();
+  const mains = await Promise.all([A, C].map((pg) => pg.locator("main").innerText()));
+  const leak2 = leakIn(textsAfter);
+  check(
+    "weigh: after the merge the cards still name no option and no person, and Ana's and Cleo's pages say nothing about a merge",
+    leak2.length === 0 && mains.every((t) => !/merge|fold/i.test(t)),
+    leak2.join(", "),
+  );
+  const topDiff = (x, y) => [...new Set(diffPaths(x, y).map((p) => p.split(".")[1]))].sort();
+  const MERGE_KEYS = ["by", "absorbed", "merged", "ownHolders", "holders", "holderCount"];
+  const diffs = [topDiff(preA, after[0]), topDiff(preC, after[2])];
+  check(
+    "weigh: Ben's merge changes Ana's and Cleo's data only in the card list and the count, and adds no merger, merged part or holder",
+    diffs.every((d) => d.every((k) => k === "weigh" || k === "uniqueCount")) && [after[0], after[2]].every((v) => MERGE_KEYS.every((k) => !keysDeep(v).has(k))),
+    `changed: ${diffs.map((d) => d.join("+")).join(" | ")}`,
+  );
   const nA = await rateAll(A, [3, 1, 2, 3]);
   const nB = await rateAll(B, [0, 2, 3, 1]);
   const nC = await rateAll(C, [1, 3, 0, 2]);
@@ -267,7 +355,7 @@ try {
   await phase(C, "vote");
 
   // ---- vote: guess who and the alone check stay private, the votes stay sealed ------------------
-  // Holders: Ana m1 wrote SCREEN, Ben m2 wrote EUROS, Cleo m3 wrote MATTE; the Zeta battery fact is Ana's and Ben's (merged).
+  // Holders: Ana m1 wrote SCREEN, Ben m2 wrote EUROS, Cleo m3 wrote MATTE; the Zeta battery fact is Ana's and Ben's (Ben merged it in weigh).
   const SCREEN = "Omega's screen is far brighter.";
   const EUROS = "Omega costs 400 euros more than Zeta.";
   const MATTE = "Zeta has a matte screen option.";
@@ -351,8 +439,21 @@ try {
   check("reveal: the score table lists the full ledger and each person's own facts", /Full ledger/.test(tableA) && /(Ana|You)\s+alone/.test(tableA) && /Ben\s+alone/.test(tableA) && /Cleo\s+alone/.test(tableA));
   check("reveal: disclaimer in all windows", (await A.getByTestId("disclaimer").innerText()) === "Unsaid never votes or recommends. These are your team's facts and your team's weights." && (await B.getByTestId("disclaimer").count()) === 1 && (await C.getByTestId("disclaimer").count()) === 1);
 
-  // Guess who: 3 guessers, 6 guesses; Ana 2 right (she fixed one), Ben 1 right, Cleo 0 right -> 3 of 6 = 50%, luck 50%.
+  // The Zeta battery fact was merged in weigh, so it has two holders: 3 facts only one person knew (not 5), and the
+  // facts at least two held (just that one) rank Zeta on their own.
   const views = [JSON.parse(await raw(A, code)), JSON.parse(await raw(B, code)), JSON.parse(await raw(C, code))];
+  const uniqueShown = await Promise.all([A, B, C].map((pg) => pg.getByTestId("reveal-unique").innerText()));
+  const sharedCards = views.map((v) => v.reveal.cards.filter((c) => c.holders.length >= 2));
+  check(
+    "reveal: 'Facts only one of you knew' is 3 in all three windows and views, and the facts at least two of you held (Ana and Ben's) rank Zeta first on their own",
+    uniqueShown.every((t) => t.trim() === "3") &&
+      views.every((v) => v.reveal.uniqueCount === 3 && v.uniqueCount === 3) &&
+      sharedCards.every((s) => s.length === 1 && [...s[0].holders].sort().join() === "Ana,Ben") &&
+      views.every((v) => v.reveal.sharedRanking.tiedFirst === false && v.reveal.sharedRanking.groups[0].options.length === 1 && v.reveal.sharedRanking.groups[0].score > 0),
+    `shown ${uniqueShown.join(", ")}; shared cards ${sharedCards.map((s) => s.length).join(", ")}; shared ranking ${canon(views[0].reveal.sharedRanking)}`,
+  );
+
+  // Guess who: 3 guessers, 6 guesses; Ana 2 right (she fixed one), Ben 1 right, Cleo 0 right -> 3 of 6 = 50%, luck 50%.
   const meter = { scope: "room", result: { guessers: 3, guesses: 6, right: 3, rightPct: 50, chancePct: 50, verdict: "near" } };
   check("reveal: ONE room-wide guess-who number, the same in all three views", views.every((v) => canon(v.reveal.guessWho) === canon(meter)), canon(views[0].reveal.guessWho));
   const norm = (t) => t.replace(/\s+/g, " ").trim();

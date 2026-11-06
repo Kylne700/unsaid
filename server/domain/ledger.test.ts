@@ -188,7 +188,17 @@ describe("neutralize", () => {
     { id: "C", name: "C++", aliases: [] },
   ];
   it("replaces whole names and aliases, longest first, case-insensitively", () => {
-    expect(neutralize("New York beats york and YRK.", opts)).toBe("this option beats this option and this option.");
+    expect(neutralize("New York beats york and YRK.", opts)).toBe("This option beats another option and another option.");
+  });
+  it("calls the card's own option 'this option' and any other option 'another option'", () => {
+    expect(neutralize("York is cheaper than New York.", opts, "A")).toBe("Another option is cheaper than this option.");
+    expect(neutralize("York is cheaper than New York.", opts, "B")).toBe("This option is cheaper than another option.");
+    expect(neutralize("Compared to York, New York is cheaper.", opts)).toBe("Compared to this option, another option is cheaper.");
+  });
+  it("capitalises at the start of the text and after a full stop, not elsewhere", () => {
+    expect(neutralize("York's rent is low. We prefer YRK! Ask New York? Fine; York wins.", opts)).toBe(
+      "This option's rent is low. We prefer this option! Ask another option? Fine; this option wins.",
+    );
   });
   it("leaves words that merely contain a name, and escapes regex characters in names", () => {
     expect(neutralize("Yorkshire is not York.", opts)).toBe("Yorkshire is not this option.");

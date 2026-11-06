@@ -82,7 +82,7 @@ describe("the seal, phase by phase (view level)", () => {
     for (const c of weigh.cards) expect(Object.keys(c).sort()).toEqual(["id", "myRating", "neutral"]);
     const text = JSON.stringify(weigh);
     for (const word of ["Lisbon", "Berlin", "Oslo", "Ana", "Ben", "Cy", "holders", "polarity"]) expect(text, word).not.toMatch(new RegExp(`\\b${word}\\b`, "i"));
-    expect(weigh.cards.some((c) => c.neutral.includes("this option"))).toBe(true);
+    expect(weigh.cards.some((c) => /this option/i.test(c.neutral))).toBe(true);
 
     const order = (m: Member) => must(asView(t.room, m).weigh).cards.map((c) => c.id);
     expect(order(t.ana)).toEqual(order(t.ana)); // same list on every poll

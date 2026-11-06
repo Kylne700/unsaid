@@ -2,6 +2,7 @@
 export const MIGRATIONS = [
   {
     version: 1,
+    name: "create-unsaid-rooms",
     sql: `CREATE TABLE IF NOT EXISTS unsaid_rooms (
         code TEXT PRIMARY KEY,
         doc TEXT NOT NULL,

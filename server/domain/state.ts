@@ -53,12 +53,16 @@ export interface CardFields {
 }
 /**
  * Puts a member's fact into the ledger. A practice fact that is already there (same fact id, same option
- * and side) gains a holder instead of a second card; everything else becomes a new card.
+ * and side) gains a holder instead of a second card; everything else becomes a new card. If the member
+ * worded it differently, their wording is kept as an "also worded" line (same shape as a merge, so Split undoes it).
  */
 export function addCardOrJoin(room: Room, ownerId: string, f: CardFields): Card {
   const same = f.factKey ? room.cards.find((c) => c.factKey === f.factKey && c.option === f.option && c.polarity === f.polarity) : undefined;
   if (same) {
-    if (!same.ownHolders.includes(ownerId)) same.ownHolders.push(ownerId);
+    const holds = [same, ...same.absorbed].some((p) => p.ownHolders.includes(ownerId));
+    if (!holds && f.text.trim() !== same.text.trim()) {
+      same.absorbed.push({ id: newId("c"), text: f.text, neutral: f.neutral, ownHolders: [ownerId], factKey: f.factKey, by: ownerId });
+    } else if (!holds) same.ownHolders.push(ownerId);
     return same;
   }
   const card: Card = { id: newId("c"), option: f.option, polarity: f.polarity, text: f.text, neutral: f.neutral, ownHolders: [ownerId], absorbed: [], factKey: f.factKey };

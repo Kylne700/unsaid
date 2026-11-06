@@ -131,7 +131,7 @@ export function addExtractedDrafts(room: Room, me: Member, extracted: ExtractedC
   let added = 0;
   for (const x of extracted) {
     if (have.has(x.text)) continue;
-    room.drafts.push({ id: newId("d"), ownerId: me.id, option: x.option, polarity: x.polarity, text: x.text, neutral: neutralize(x.neutral || x.text, room.options), origin: "notes", phrase: null, factKey: null });
+    room.drafts.push({ id: newId("d"), ownerId: me.id, option: x.option, polarity: x.polarity, text: x.text, neutral: neutralize(x.neutral || x.text, room.options, x.option), origin: "notes", phrase: null, factKey: null });
     added++;
   }
   return added;
@@ -142,7 +142,7 @@ export function saveDraft(room: Room, me: Member, input: { draftId?: string | un
   const text = input.text.trim();
   if (text.length < 1 || text.length > MAX_TEXT) throw new RoomError(`A card is 1 to ${MAX_TEXT} characters.`);
   if (input.option !== null && !optionExists(room, input.option)) throw new RoomError("Unknown option.");
-  const neutral = neutralize((input.neutral ?? "").trim() || text, room.options);
+  const neutral = neutralize((input.neutral ?? "").trim() || text, room.options, input.option);
   if (input.draftId) {
     const d = ownDraft(room, me, input.draftId);
     Object.assign(d, { text, neutral, option: input.option, polarity: input.polarity });
@@ -160,7 +160,7 @@ export function approveDraft(room: Room, me: Member, draftId: string): Card {
   needPhase(room, "cards");
   const d = ownDraft(room, me, draftId);
   if (!d.option || !d.polarity) throw new RoomError("Choose which option this fact is about and whether it is a pro or a con.");
-  const card = addCardOrJoin(room, me.id, { option: d.option, polarity: d.polarity, text: d.text, neutral: neutralize(d.neutral || d.text, room.options), factKey: d.factKey });
+  const card = addCardOrJoin(room, me.id, { option: d.option, polarity: d.polarity, text: d.text, neutral: neutralize(d.neutral || d.text, room.options, d.option), factKey: d.factKey });
   room.drafts.splice(room.drafts.indexOf(d), 1);
   return card;
 }

@@ -134,9 +134,9 @@ describe("cards, merge and the unique count", () => {
     const t = live();
     forceAdvance(t.room, t.ana);
     const d = saveDraft(t.room, t.ana, { text: "Lisbon's rent is low.", option: "A", polarity: "pro", neutral: "Lisbon rent is low, says Berlin." });
-    expect(d.neutral).toBe("this option rent is low, says this option.");
+    expect(d.neutral).toBe("This option rent is low, says another option.");
     const auto = saveDraft(t.room, t.ana, { text: "Oslo is dark in winter.", option: "C", polarity: "con" });
-    expect(auto.neutral).toBe("this option is dark in winter.");
+    expect(auto.neutral).toBe("This option is dark in winter.");
   });
 
   it("merge unions the holders, unmerge restores both cards, and the unique count follows", () => {
@@ -176,6 +176,28 @@ describe("cards, merge and the unique count", () => {
     expect(t.room.cards).toHaveLength(2);
   });
 
+  it("practice: an edited wording of a fact already on the ledger is kept as 'also worded', and Split undoes it", async () => {
+    const { createPractice } = await import("./room");
+    const p = createPractice("PRACT3");
+    const me = must(memberByToken(p.room, p.token));
+    setInitialPick(p.room, me, "B");
+    setDone(p.room, me, true);
+    const [plain, edited] = p.room.drafts.filter((d) => d.ownerId === me.id && d.factKey && p.room.cards.some((c) => c.factKey === d.factKey));
+    const target = p.room.cards.find((c) => c.factKey === must(edited).factKey)!;
+    const before = p.room.cards.length;
+    const original = must(edited).text;
+    approveDraft(p.room, me, must(plain).id); // same wording: simply joins
+    const joined = p.room.cards.find((c) => c.factKey === must(plain).factKey)!;
+    expect(joined.ownHolders).toContain(me.id);
+    expect(joined.absorbed).toHaveLength(0);
+    saveDraft(p.room, me, { draftId: must(edited).id, text: `${original} I checked this myself.`, option: must(edited).option!, polarity: must(edited).polarity! });
+    approveDraft(p.room, me, must(edited).id);
+    expect(p.room.cards).toHaveLength(before); // still one card per fact
+    expect(target.absorbed.map((a) => a.text)).toEqual([`${original} I checked this myself.`]);
+    expect(holdersOf(target)).toContain(me.id);
+    unmergeCard(p.room, me, target.id, must(target.absorbed[0]).id);
+    expect(p.room.cards).toHaveLength(before + 1);
+  });
   it("withdraw hands a card back to its holder as a draft", () => {
     const t = live();
     forceAdvance(t.room, t.ana);
@@ -197,8 +219,8 @@ describe("extractCards stub", () => {
     expect(out.map((x) => x.text)).toEqual(["Lisbon has cheap flights.", "Rent is low!", "Berlin is lively; Lisbon beats Berlin on sun."]);
     expect(out.map((x) => x.option)).toEqual(["A", null, null]); // none or two named: unset
     expect(out.every((x) => x.polarity === null)).toBe(true);
-    expect(out[0]?.neutral).toBe("this option has cheap flights.");
-    expect(out[2]?.neutral).toBe("this option is lively; this option beats this option on sun.");
+    expect(out[0]?.neutral).toBe("This option has cheap flights.");
+    expect(out[2]?.neutral).toBe("This option is lively; another option beats this option on sun.");
   });
 
   it("adds drafts once: running it twice does not duplicate", () => {

@@ -66,10 +66,22 @@ function optionNameRegex(options: OptionDef[]): RegExp | null {
   return new RegExp(`(?<![\\p{L}\\p{N}])(?:${names.map(escapeRegex).join("|")})(?![\\p{L}\\p{N}])`, "giu");
 }
 
-/** The same fact with every option name or alias replaced by "this option". */
-export function neutralize(text: string, options: OptionDef[]): string {
+/**
+ * The same fact with the option it is about called "this option" and any other option it names called
+ * "another option" (so "Omega costs more than Zeta" stays readable). With no subject, the first option named is the subject.
+ * shortcut: capitalises only at the start of the text or after . ! ? , not after a quote or bracket.
+ */
+export function neutralize(text: string, options: OptionDef[], subject?: string | null): string {
   const re = optionNameRegex(options);
-  return re ? text.replace(re, "this option") : text;
+  if (!re) return text;
+  const idOf = new Map(options.flatMap((o) => [o.name, ...o.aliases].map((n) => [n.trim().toLowerCase(), o.id] as const)));
+  let about: string | null | undefined = subject;
+  return text.replace(re, (name: string, at: number) => {
+    const id = idOf.get(name.toLowerCase());
+    about ??= id;
+    const label = id === about ? "this option" : "another option";
+    return /(^|[.!?]\s+)$/.test(text.slice(0, at)) ? label.charAt(0).toUpperCase() + label.slice(1) : label;
+  });
 }
 
 /** Which options a text names (by name or alias), as option ids. */

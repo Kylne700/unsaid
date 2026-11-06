@@ -45,6 +45,50 @@ try {
   const barText = await page.getByTestId("phase-bar").innerText();
   check("phase bar: the player is shown as 'You', not 'You (you)'", /\bYou\b/.test(barText) && !/You \(you\)/.test(barText));
 
+  // ---- polling: a visible tab reads the room every 2 s, a hidden tab reads nothing, showing it again reads once --------
+  // Headless Chromium never hides a tab, so a hidden tab is stood in for: visibilityState and hidden are overridden and
+  // visibilitychange is fired, which is all the polling library listens to. A real background tab is NOT VERIFIED here.
+  const requests = [];
+  page.on("request", (r) => requests.push({ at: Date.now(), path: new URL(r.url()).pathname }));
+  const readsSince = (from) => requests.filter((x) => x.at >= from && x.path.endsWith("/get-room")).length;
+  const setHidden = (hidden) =>
+    page.evaluate((h) => {
+      if (h) {
+        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+        Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+      } else {
+        delete document.visibilityState;
+        delete document.hidden;
+      }
+      document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
+    }, hidden);
+  let from = Date.now();
+  await page.waitForTimeout(6000);
+  const visibleReads = readsSince(from);
+  check("polling: a visible tab reads the room every 2 s, not every second (control)", visibleReads >= 2 && visibleReads <= 4, `${visibleReads} reads in 6 s`);
+  await setHidden(true);
+  await page.waitForTimeout(600); // a read already on its way may still land
+  from = Date.now();
+  await page.waitForTimeout(7000);
+  const whileHidden = requests.filter((x) => x.at >= from);
+  check("polling: a hidden tab sends no request at all in 7 s", whileHidden.length === 0, whileHidden.length ? `${whileHidden.length}: ${[...new Set(whileHidden.map((x) => x.path))].join(", ")}` : "0 requests");
+  // Twice, because one interval tick could land by chance within 250 ms of showing the tab.
+  const firstReadAfterShowing = async () => {
+    const t = Date.now();
+    await setHidden(false);
+    await page.waitForTimeout(600);
+    const r = requests.find((x) => x.at >= t && x.path.endsWith("/get-room"));
+    return r ? r.at - t : null;
+  };
+  const back1 = await firstReadAfterShowing();
+  await setHidden(true);
+  await page.waitForTimeout(2500);
+  const back2 = await firstReadAfterShowing();
+  check("polling: showing the tab again reads the room right away, both times", back1 !== null && back1 < 250 && back2 !== null && back2 < 250, `first read ${back1} ms and ${back2} ms after showing`);
+  from = Date.now();
+  await page.waitForTimeout(5000);
+  check("polling: ... and the polling carries on every 2 s", readsSince(from) >= 2 && readsSince(from) <= 4, `${readsSince(from)} reads in 5 s`);
+
   const doneBtn = page.getByRole("button", { name: "I'm done", exact: true });
   check("notes: 'I'm done' is blocked until the lean is sealed", await doneBtn.isDisabled());
   await page.getByRole("radio", { name: "Brightpane Chat" }).click();

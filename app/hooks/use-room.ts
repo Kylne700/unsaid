@@ -1,4 +1,4 @@
-// Reads a room (polling once a second, so every open window follows within 2 s) and runs room actions.
+// Reads a room (polling every 2 s while the tab is visible, so another open window follows within about 2 s) and runs room actions.
 // Every call here is one of the framework actions in /actions: the chat agent calls the same ones.
 import { actionErrorMessage, callAction, useActionQuery } from "@agent-native/core/client/hooks";
 import { useCallback, useState } from "react";
@@ -9,7 +9,7 @@ export type RoomData = RoomView | GuestView;
 export type RunResult<T> = { ok: true; data: T } | { ok: false };
 export type RunAction = <T = unknown>(name: string, args?: Record<string, unknown>) => Promise<RunResult<T>>;
 
-const POLL_MS = 1000;
+const POLL_MS = 2000;
 const POLL_AFTER_ERROR_MS = 5000;
 
 export function useRoomQuery(code: string, token: string | null, enabled: boolean) {
@@ -20,7 +20,10 @@ export function useRoomQuery(code: string, token: string | null, enabled: boolea
       method: "POST",
       enabled,
       refetchInterval: (query) => (query.state.status === "error" ? POLL_AFTER_ERROR_MS : POLL_MS),
-      refetchIntervalInBackground: true,
+      // A hidden tab does not poll (each poll costs hosting credits and keeps the database awake). Showing it again reads
+      // the room once right away; "always" because the house staleTime (30 s) would otherwise skip that read.
+      refetchIntervalInBackground: false,
+      refetchOnWindowFocus: "always",
     },
   );
 }

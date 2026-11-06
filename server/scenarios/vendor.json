@@ -1,0 +1,83 @@
+{
+  "id": "vendor-v1",
+  "title": "Pick the support-chat vendor",
+  "question": "Which vendor should the support team sign a 12-month contract with?",
+  "options": [
+    { "id": "A", "name": "Kelvane Desk", "aliases": ["Kelvane"] },
+    { "id": "B", "name": "Brightpane Chat", "aliases": ["Brightpane"] },
+    { "id": "C", "name": "Cobbleline Basic", "aliases": ["Cobbleline"] }
+  ],
+  "best": "A",
+  "bait": "B",
+  "members": [
+    { "id": "m1", "name": "You", "role": "Ops lead", "simulated": false },
+    { "id": "m2", "name": "Noa", "role": "Finance lead", "simulated": true },
+    { "id": "m3", "name": "Idris", "role": "Security lead", "simulated": true }
+  ],
+  "facts": [
+    { "id": "f01", "option": "B", "polarity": "pro", "text": "Brightpane's agent interface scored best of the three in the demo.", "neutral": "The agent interface scored best of the three in the demo.", "holders": ["m1", "m2", "m3"] },
+    { "id": "f02", "option": "B", "polarity": "pro", "text": "Brightpane's list price is $15 per agent per month, the lowest of the three.", "neutral": "The list price is $15 per agent per month, the lowest of the three.", "holders": ["m1", "m2", "m3"] },
+    { "id": "f03", "option": "B", "polarity": "pro", "text": "Brightpane connects to our shop platform in one click.", "neutral": "The tool connects to our shop platform in one click.", "holders": ["m1", "m2", "m3"] },
+    { "id": "f04", "option": "B", "polarity": "pro", "text": "Brightpane includes free onboarding and data migration.", "neutral": "Onboarding and data migration are included free of charge.", "holders": ["m1", "m2", "m3"] },
+    { "id": "f05", "option": "A", "polarity": "con", "text": "Kelvane's list price is $26 per agent per month, the highest of the three.", "neutral": "The list price is $26 per agent per month, the highest of the three.", "holders": ["m1", "m2", "m3"] },
+    { "id": "f06", "option": "C", "polarity": "con", "text": "Cobbleline has no chat widget for mobile apps.", "neutral": "The tool has no chat widget for mobile apps.", "holders": ["m1", "m2", "m3"] },
+    { "id": "f07", "option": "A", "polarity": "pro", "text": "In a two-week pilot, agents resolved tickets 30% faster on Kelvane than on our current tool.", "neutral": "In a two-week pilot, agents resolved tickets 30% faster than on the current tool.", "holders": ["m1"] },
+    { "id": "f08", "option": "A", "polarity": "pro", "text": "Kelvane's order lookup worked with our shop data without custom code.", "neutral": "The order lookup worked with our shop data without custom code.", "holders": ["m1"] },
+    { "id": "f09", "option": "B", "polarity": "con", "text": "Brightpane went down for four hours, twice, during the pilot.", "neutral": "The service went down for four hours, twice, during the pilot.", "holders": ["m1"] },
+    { "id": "f10", "option": "A", "polarity": "pro", "text": "Kelvane will lock the per-seat price for three years.", "neutral": "The vendor will lock the per-seat price for three years.", "holders": ["m2"] },
+    { "id": "f11", "option": "A", "polarity": "pro", "text": "Kelvane charges no overage fees when chat volume spikes.", "neutral": "There are no overage fees when chat volume spikes.", "holders": ["m2"] },
+    { "id": "f12", "option": "B", "polarity": "con", "text": "Brightpane's renewal price rises 35% after year one.", "neutral": "The renewal price rises 35% after year one.", "holders": ["m2"] },
+    { "id": "f13", "option": "A", "polarity": "pro", "text": "Kelvane's latest SOC 2 Type II report is clean.", "neutral": "The latest SOC 2 Type II report is clean.", "holders": ["m3"] },
+    { "id": "f14", "option": "A", "polarity": "pro", "text": "Kelvane keeps EU customer data in the EU at no extra charge.", "neutral": "Customer data stays in the EU at no extra charge.", "holders": ["m3"] },
+    { "id": "f15", "option": "B", "polarity": "con", "text": "Brightpane stores all data in the US and offers no EU option.", "neutral": "All data is stored in the US, with no EU option.", "holders": ["m3"] }
+  ],
+  "packets": {
+    "m1": {
+      "memo": "Ops notes for Friday's vendor decision (support chat tool, 12 agents).\n\n- Demo day: Brightpane's agent interface scored best of the three.\n- Brightpane's list price is $15 per agent per month, the lowest.\n- Brightpane connects to our shop platform in one click.\n- Brightpane includes free onboarding and data migration.\n- Kelvane's list price is $26 per agent per month, the highest.\n- Cobbleline has no chat widget for mobile apps.\n- I ran a two-week pilot with Kelvane and Brightpane side by side. Agents resolved tickets 30% faster on Kelvane than on our current tool.\n- Kelvane's order lookup worked with our shop data without custom code.\n- Brightpane went down for four hours, twice, during the pilot.",
+      "factPhrases": {
+        "f01": "Brightpane's agent interface scored best of the three",
+        "f02": "Brightpane's list price is $15 per agent per month, the lowest",
+        "f03": "Brightpane connects to our shop platform in one click",
+        "f04": "Brightpane includes free onboarding and data migration",
+        "f05": "Kelvane's list price is $26 per agent per month, the highest",
+        "f06": "Cobbleline has no chat widget for mobile apps",
+        "f07": "Agents resolved tickets 30% faster on Kelvane than on our current tool",
+        "f08": "Kelvane's order lookup worked with our shop data without custom code",
+        "f09": "Brightpane went down for four hours, twice, during the pilot"
+      }
+    },
+    "m2": {
+      "memo": "Finance notes for Friday's call on the three support-chat vendors, based on list prices and the written quotes I requested. Brightpane's agent interface won the demo, and its list price is the lowest at $15 per agent per month. It hooks into our shop platform in one click, and onboarding plus data migration are free. Kelvane is the most expensive on paper at $26 per agent per month. Cobbleline has no mobile chat widget. Kelvane will lock the per-seat price for three years and charges no overage fees when chat volume spikes. Brightpane's renewal price rises 35% after year one.",
+      "factPhrases": {
+        "f01": "Brightpane's agent interface won the demo",
+        "f02": "its list price is the lowest at $15 per agent per month",
+        "f03": "It hooks into our shop platform in one click",
+        "f04": "onboarding plus data migration are free",
+        "f05": "Kelvane is the most expensive on paper at $26 per agent per month",
+        "f06": "Cobbleline has no mobile chat widget",
+        "f10": "Kelvane will lock the per-seat price for three years",
+        "f11": "charges no overage fees when chat volume spikes",
+        "f12": "Brightpane's renewal price rises 35% after year one"
+      }
+    },
+    "m3": {
+      "memo": "Security review summary for Friday's vendor call.\n\n- Brightpane: best-rated agent interface in the demo, and the lowest list price at $15 per agent per month.\n- Brightpane hooks into our shop platform in one click; onboarding and data migration are free.\n- Kelvane is the priciest at $26 per agent per month.\n- Cobbleline: no chat widget for mobile apps.\n- I read the audit reports and data-hosting terms for all three vendors this week. Kelvane's latest SOC 2 Type II report is clean.\n- Kelvane keeps EU customer data in the EU at no extra charge.\n- Brightpane stores all data in the US and offers no EU option.",
+      "factPhrases": {
+        "f01": "best-rated agent interface in the demo",
+        "f02": "the lowest list price at $15 per agent per month",
+        "f03": "hooks into our shop platform in one click",
+        "f04": "onboarding and data migration are free",
+        "f05": "Kelvane is the priciest at $26 per agent per month",
+        "f06": "Cobbleline: no chat widget for mobile apps",
+        "f13": "Kelvane's latest SOC 2 Type II report is clean",
+        "f14": "Kelvane keeps EU customer data in the EU at no extra charge",
+        "f15": "Brightpane stores all data in the US and offers no EU option"
+      }
+    }
+  },
+  "simulatedRatings": {
+    "m2": { "f01": 2, "f02": 3, "f03": 2, "f04": 2, "f05": 3, "f06": 2, "f07": 3, "f08": 2, "f09": 3, "f10": 3, "f11": 2, "f12": 3, "f13": 2, "f14": 2, "f15": 2 },
+    "m3": { "f01": 1, "f02": 2, "f03": 1, "f04": 1, "f05": 2, "f06": 1, "f07": 2, "f08": 1, "f09": 3, "f10": 2, "f11": 1, "f12": 2, "f13": 3, "f14": 3, "f15": 3 }
+  },
+  "simulatedInitialPick": { "m2": "B", "m3": "B" }
+}

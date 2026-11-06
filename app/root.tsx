@@ -33,6 +33,7 @@ import {
   threadIdFromPath,
 } from "@/lib/chat-paths";
 import { TAB_ID } from "@/lib/tab-id";
+import { isUnsaidPath } from "@/lib/unsaid-paths";
 
 import { i18nCatalog } from "./i18n";
 
@@ -180,15 +181,24 @@ export default function Root() {
   // The path, not the visitor, picks the shell, so the SSR shell stays one
   // cached page per URL.
   const { pathname } = useLocation();
+  // Unsaid pages are public (no account); the scaffold's own routes stay behind sign-in.
+  const isPublic = isUnsaidPath(pathname);
   return (
     <AppToolkitProvider>
       <AppProviders
         queryClient={queryClient}
+        isPublicPath={isPublic}
         skeletonLayout={skeletonLayoutForPath(pathname)}
         i18n={{ catalog: i18nCatalog }}
       >
-        <DbSyncSetup />
-        <AppContent />
+        {isPublic ? (
+          <Outlet />
+        ) : (
+          <>
+            <DbSyncSetup />
+            <AppContent />
+          </>
+        )}
       </AppProviders>
     </AppToolkitProvider>
   );

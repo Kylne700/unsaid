@@ -6,14 +6,14 @@ export function Shell({ children, right }: { children: ReactNode; right?: ReactN
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b">
-        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-6">
+        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
           <Link to="/" className="text-lg font-semibold tracking-tight">
             Unsaid
           </Link>
           <div className="text-sm text-muted-foreground">{right}</div>
         </div>
       </header>
-      <main className="mx-auto max-w-5xl px-6 py-8">{children}</main>
+      <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>
     </div>
   );
 }

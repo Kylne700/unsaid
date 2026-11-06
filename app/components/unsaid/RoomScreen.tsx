@@ -63,6 +63,7 @@ export function RoomScreen({ code, token, room, refresh }: { code: string; token
 
   return (
     <RoomProvider value={ctx}>
+      {/* A fixed, empty model list (the model is set on the server): without it the sidebar asks the account-only model, Builder and key-status routes, which answer 401 to a guest. */}
       <AgentSidebar
         position="right"
         defaultOpen
@@ -70,6 +71,8 @@ export function RoomScreen({ code, token, room, refresh }: { code: string; token
         browserTabId={TAB_ID}
         showMissingApiKeySetup={false}
         showModelSelector={false}
+        availableModels={[]}
+        modelListLoading={false}
         composerPlaceholder="Ask about your notes or this room"
         emptyStateText="I help you put down what you know and turn it into cards. I never vote, rate or recommend."
         suggestions={["Draft cards from my notes", "Where does the room stand?", "What can you do for me?"]}

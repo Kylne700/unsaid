@@ -6,8 +6,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 // Framework noise: session-gated endpoints that answer 401 to a guest. The engine-readiness probe runs on every
-// public page; the rest are the chat sidebar's account/settings probes on the room page (models, voice, uploads,
-// Builder, title generation, checkpoints). The guest chat itself (threads, runs, messages) must never be here.
+// public page; the rest are the chat sidebar's account/settings probes on the room page (voice, uploads, org, dev
+// mode, title generation, checkpoints, ...). The sidebar offers no switch for them; only the model, Builder and key-status
+// probes are gone, through RoomScreen's empty model list. The guest chat itself (threads, runs, messages) must never be here.
 const KNOWN_401 = new Set(
   [
     "agent-engine/status",
@@ -16,12 +17,9 @@ const KNOWN_401 = new Set(
     "agent-chat/generate-title",
     "agent-chat/checkpoints",
     "org/me",
-    "env-status",
-    "builder/status",
     "connection-status/builder",
     "voice-providers/status",
     "file-upload/status",
-    "actions/manage-agent-engine",
     "actions/context-manifest-get",
   ].map((p) => `/_agent-native/${p}`),
 );

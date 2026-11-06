@@ -1,11 +1,12 @@
 // Practice run end to end in a fresh headless Chromium (own temp profile, 127.0.0.1 only):
-// home -> "Try the trap" -> notes + sealed lean -> cards -> blind weigh -> vote -> reveal.
+// home -> "Try the trap" -> notes + sealed lean -> cards -> blind weigh -> vote (guess who, alone check) -> reveal.
 // Run: node scripts/e2e/practice.mjs --pw-core=<path to playwright-core/index.mjs>   (dev server on http://127.0.0.1:18744, or --base=...)
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { assertClean, BASE, newPlayer } from "./harness.mjs";
+import scenario from "../../server/scenarios/vendor.json" with { type: "json" };
+import { assertClean, BASE, newPlayer, rawRoom } from "./harness.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SHOTS = path.resolve(here, "../../docs/shots");
@@ -95,6 +96,29 @@ try {
   // ---- vote ----------------------------------------------------------------------------------
   const voteText = await page.locator("main").innerText();
   check("vote: no scores or totals before the reveal", !/Full ledger|own facts only|points to/i.test(voteText));
+  // Guess who knew each fact that exactly one teammate knew. The scenario file is the ground truth for who that was:
+  // right, wrong, right, not sure, right, wrong -> 5 guesses, 3 right.
+  const holderOf = new Map(scenario.facts.map((f) => [f.text, f.holders]));
+  const nameOf = { m2: "Noa", m3: "Idris" };
+  const guessCards = page.locator('[data-testid="vote-card"][data-guessable="true"]');
+  const gn = await guessCards.count();
+  check("vote: exactly the six facts one teammate knew can be guessed", gn === 6 && (await page.getByTestId("guess-select").count()) === 6, `${gn} guessable cards`);
+  let made = 0;
+  let right = 0;
+  for (let i = 0; i < gn; i++) {
+    if (i === 3) continue;
+    const card = guessCards.nth(i);
+    const holders = holderOf.get(await card.locator("p").first().innerText()) ?? [];
+    const truth = nameOf[holders[0]];
+    const pick = i % 2 === 1 ? (truth === "Noa" ? "Idris" : "Noa") : truth;
+    await card.getByTestId("guess-select").selectOption({ label: `${pick} (simulated)` });
+    made++;
+    if (pick === truth) right++;
+  }
+  const stored = async () => (JSON.parse(await rawRoom(page, code)).ledger ?? []).filter((c) => c.myGuess).length;
+  for (let i = 0; i < 40 && (await stored()) < made; i++) await page.waitForTimeout(250);
+  check("vote: the guesses are stored before the vote is sealed", (await stored()) === made && made === 5 && right === 3, `${await stored()} stored; ${right} of ${made} right by the scenario`);
+  await page.getByTestId("expect-same").selectOption("0"); // "none of the other two will pick what I pick"
   await page.getByRole("radio", { name: "Kelvane Desk" }).click();
   await shot("05-vote.png", true);
   await page.getByRole("button", { name: "Seal my vote" }).click();
@@ -115,6 +139,14 @@ try {
   check("reveal: changed facts are listed with their holders", (await page.getByTestId("changed-card").count()) >= 1, `${await page.getByTestId("changed-card").count()} facts`);
   const disclaimer = await page.getByTestId("disclaimer").innerText();
   check("reveal: disclaimer line", disclaimer === "Unsaid never votes or recommends. These are your team's facts and your team's weights.", disclaimer);
+  const norm = (t) => t.replace(/\s+/g, " ").trim();
+  const gw = norm(await page.getByTestId("guess-who").innerText());
+  check("reveal: guess who is labelled practice and shows only your own guesses against luck", /Practice/.test(gw) && gw.includes(`Your guesses: ${right} of ${made} right. Luck would give 50%.`) && (await page.getByTestId("guess-who").getAttribute("data-scope")) === "practice", gw.slice(0, 160));
+  check("reveal: practice shows no room-wide number", (await page.getByTestId("guess-pct").count()) === 0);
+  const alone = norm(await page.getByTestId("alone-line").innerText());
+  check("reveal: alone check says what you expected and what happened", alone === "You expected 0 of 2 to pick the same option as you. 2 did.", alone);
+  const revealRaw = JSON.parse(await rawRoom(page, code));
+  check("reveal: the view carries your own result only", revealRaw.reveal.guessWho.scope === "practice" && revealRaw.reveal.guessWho.result.guesses === made && revealRaw.reveal.guessWho.result.right === right && JSON.stringify(revealRaw.reveal.aloneCheck) === JSON.stringify({ expected: 0, actual: 2, others: 2 }));
   const picks = await page.getByTestId("picks").innerText();
   check("reveal: leans and votes of simulated teammates are shown", /Noa[\s\S]*simulated[\s\S]*Leaned to\s+Brightpane Chat[\s\S]*voted\s+Kelvane Desk/i.test(picks));
   await page.evaluate(() => window.scrollTo(0, 0));

@@ -72,3 +72,11 @@ export function assertClean(...players) {
   const all = players.flatMap((p) => p.problems);
   if (all.length) throw new Error(`guest-path problems:\n${all.join("\n")}`);
 }
+
+/** The room exactly as this page's member gets it from get-room (the call the screen polls), as text. */
+export const rawRoom = (page, code) =>
+  page.evaluate(async (c) => {
+    const token = window.localStorage.getItem(`unsaid:member:${c}`);
+    const r = await fetch("/_agent-native/actions/get-room", { method: "POST", headers: { "content-type": "application/json", "x-agent-native-frontend": "1" }, body: JSON.stringify({ code: c, token }) });
+    return await r.text();
+  }, code);

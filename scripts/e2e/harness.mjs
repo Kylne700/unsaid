@@ -5,8 +5,26 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-// Framework noise on every public page: the engine-readiness probe is session-gated and answers 401.
-const KNOWN_401 = new Set(["/_agent-native/agent-engine/status"]);
+// Framework noise: session-gated endpoints that answer 401 to a guest. The engine-readiness probe runs on every
+// public page; the rest are the chat sidebar's account/settings probes on the room page (models, voice, uploads,
+// Builder, title generation, checkpoints). The guest chat itself (threads, runs, messages) must never be here.
+const KNOWN_401 = new Set(
+  [
+    "agent-engine/status",
+    "agent-chat/mode",
+    "agent-chat/capabilities",
+    "agent-chat/generate-title",
+    "agent-chat/checkpoints",
+    "org/me",
+    "env-status",
+    "builder/status",
+    "connection-status/builder",
+    "voice-providers/status",
+    "file-upload/status",
+    "actions/manage-agent-engine",
+    "actions/context-manifest-get",
+  ].map((p) => `/_agent-native/${p}`),
+);
 
 // Options come from the command line: --base=http://127.0.0.1:18744  --pw-core=<path to playwright-core/index.mjs>
 // (playwright-core is not an app dependency; without --pw-core the bare package name is imported).

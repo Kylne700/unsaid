@@ -1,7 +1,7 @@
 // Playwright helper for the local checks. Every player is a fresh headless Chromium with its own
 // temp profile; it never attaches to another browser. Only 127.0.0.1 is reachable (no Google, no
 // third-party hosts). Any 401, visit to /sign-in or page error is recorded as a problem.
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -61,7 +61,11 @@ export async function newPlayer(label, { width = 1280, height = 860 } = {}) {
     problems,
     blocked,
     async close() {
-      await ctx.close();
+      try {
+        await ctx.close();
+      } finally {
+        rmSync(profile, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }); // the profile is ~200 MB; safe to call twice
+      }
     },
   };
 }

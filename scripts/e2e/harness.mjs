@@ -8,10 +8,11 @@ import path from "node:path";
 // Framework noise on every public page: the engine-readiness probe is session-gated and answers 401.
 const KNOWN_401 = new Set(["/_agent-native/agent-engine/status"]);
 
-export const BASE = process.env.BASE_URL || "http://127.0.0.1:18744";
-const PW_CORE =
-  process.env.PW_CORE ||
-  "playwright-core";
+// Options come from the command line: --base=http://127.0.0.1:18744  --pw-core=<path to playwright-core/index.mjs>
+// (playwright-core is not an app dependency; without --pw-core the bare package name is imported).
+const arg = (name, fallback) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3) || fallback;
+export const BASE = arg("base", "http://127.0.0.1:18744");
+const PW_CORE = arg("pw-core", "playwright-core");
 
 export async function newPlayer(label, { width = 1280, height = 860 } = {}) {
   const { chromium } = await import(PW_CORE);

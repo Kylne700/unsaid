@@ -1,6 +1,7 @@
 // Three people in one live room, each in their own fresh headless Chromium profile (own cookies and
 // localStorage, 127.0.0.1 only). Checks live sync (no reload), force-advance, auto-advance, merge/split,
-// the private-draft rule and the seal over the raw HTTP actions, then guess who and the alone check (nobody
+// the private-draft rule, the cards-phase rule (your own cards in full, only a number for everyone else's)
+// and the seal over the raw HTTP actions, then guess who and the alone check (nobody
 // else's guess reaches another window), and the reveal in all three windows.
 // Run: node scripts/e2e/live.mjs --pw-core=<path to playwright-core/index.mjs>   (dev server on http://127.0.0.1:18744, or --base=...)
 import { mkdirSync } from "node:fs";
@@ -13,7 +14,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const SHOTS = path.resolve(here, "../../docs/shots");
 mkdirSync(SHOTS, { recursive: true });
 
-const LIMIT_MS = 3000; // the brief says 2 s; the check allows one poll of slack
+const LIMIT_MS = 3000; // the brief says 2 s; the screen polls every 2 s while the tab is visible, so the check allows one slow request on top
 const checks = [];
 const timings = [];
 const check = (name, ok, detail = "") => {
@@ -43,7 +44,6 @@ const live = (name, ms) => {
 };
 // These two run inside the page (Playwright serialises them), so they use nothing from this file.
 const uniqueIs = (k) => new RegExp(`Facts only one of you knew:\\s*${k}\\b`).test(document.querySelector('[data-testid="unique-count"]')?.textContent ?? "");
-const hasLedgerText = (text) => [...document.querySelectorAll('[data-testid="ledger-card"]')].some((el) => el.textContent.includes(text));
 const textIn = (page, testid, re) => page.waitForFunction(([id, src]) => new RegExp(src).test(document.querySelector(`[data-testid="${id}"]`)?.textContent ?? ""), [testid, re], { timeout: 8000 });
 // Paths (".members.0.done") where two parsed views differ.
 const diffPaths = (a, b, p = "") => {
@@ -145,31 +145,58 @@ try {
   check("join: after the notes phase the link no longer offers a name box", (await L.getByLabel("Your name").count()) === 0);
   await late.close();
 
-  // ---- cards: drafts stay private, approved cards go live -------------------------------------
-  await addFact(A, "Zeta lasts two days on a charge.", "Zeta", "Pro");
-  await addFact(A, "Omega's screen is far brighter.", "Omega", "Pro");
+  // ---- cards: drafts stay private, and so do approved cards until the room moves on to weigh ----------
+  // Each person sees their own approved cards in full and only a number for everyone else's.
+  const ANA = ["Zeta lasts two days on a charge.", "Omega's screen is far brighter."];
+  const BEN = ["The Zeta battery gives two full days.", "Omega costs 400 euros more than Zeta."];
+  const CLEO = ["Zeta has a matte screen option."];
+  const othersAre = (k) => document.querySelector('[data-testid="others-card-count"]')?.getAttribute("data-count") === String(k);
+  await addFact(A, ANA[0], "Zeta", "Pro");
+  await addFact(A, ANA[1], "Omega", "Pro");
   await addFact(A, "Omega fans are loud in open offices.", "Omega", "Con"); // stays a draft
   const rawBenDraft = await raw(B, code);
   const rawAnaDraft = await raw(A, code);
   check("cards: Ana's unapproved draft is in her own data and not in Ben's", rawAnaDraft.includes("loud in open offices") && !rawBenDraft.includes("loud in open offices"));
   const t0 = await approveFirst(A);
-  await B.getByTestId("ledger-card").filter({ hasText: "Zeta lasts two days on a charge." }).first().waitFor({ timeout: 8000 });
-  live("a card Ana approved appears in Ben's window (from her click)", Date.now() - t0);
+  await B.waitForFunction(othersAre, 1, { timeout: 8000 });
+  live("the number of Ana's approved cards reaches Ben's window (from her click)", Date.now() - t0);
   await approveFirst(A);
-  await addFact(B, "The Zeta battery gives two full days.", "Zeta", "Pro");
-  await addFact(B, "Omega costs 400 euros more than Zeta.", "Omega", "Con");
+  await B.waitForFunction(othersAre, 2, { timeout: 8000 });
+  // Ben's window has caught up (it says 2), so not seeing the text is no stale page.
+  const anaCards = JSON.parse(await raw(A, code)).ledger;
+  const benRaw = await raw(B, code);
+  const benNow = JSON.parse(benRaw);
+  const benBody = await B.locator("body").innerText();
+  check(
+    "cards: Ben sees only the number of Ana's approved cards (2): no text, no card id, no holders, in the page and in his raw data",
+    anaCards.length === 2 && anaCards.every((c) => c.mine) && ANA.every((t) => !benBody.includes(t) && !benRaw.includes(t)) && anaCards.every((c) => !benRaw.includes(c.id)) && benNow.ledger.length === 0 && benNow.othersCardCount === 2,
+    `Ben's ledger: ${benNow.ledger.length} cards; others: ${benNow.othersCardCount}`,
+  );
+  await addFact(B, BEN[0], "Zeta", "Pro");
+  await addFact(B, BEN[1], "Omega", "Con");
   const t1 = await approveFirst(B);
-  await A.waitForFunction(hasLedgerText, "The Zeta battery gives two full days.", { timeout: 8000 });
-  live("a card Ben approved appears in Ana's window (from his click)", Date.now() - t1);
+  await A.waitForFunction(othersAre, 1, { timeout: 8000 });
+  live("the number of Ben's approved cards reaches Ana's window (from his click)", Date.now() - t1);
   await approveFirst(B);
-  await A.waitForFunction(hasLedgerText, "400 euros", { timeout: 8000 });
-  await addFact(C, "Zeta has a matte screen option.", "Zeta", "Pro");
+  await A.waitForFunction(othersAre, 2, { timeout: 8000 });
+  await addFact(C, CLEO[0], "Zeta", "Pro");
   const t2 = await approveFirst(C);
-  await A.waitForFunction(hasLedgerText, "matte screen option", { timeout: 8000 });
-  live("a card Cleo approved appears in Ana's window (from her click)", Date.now() - t2);
+  await A.waitForFunction(othersAre, 3, { timeout: 8000 });
+  live("the number of Cleo's approved card reaches Ana's window (from her click)", Date.now() - t2);
+  await B.waitForFunction(othersAre, 3, { timeout: 8000 });
+  await C.waitForFunction(othersAre, 4, { timeout: 8000 });
+  const bodies = await Promise.all([A, B, C].map((pg) => pg.locator("body").innerText()));
+  const ownOf = [ANA, BEN, CLEO];
+  const everyone = [...ANA, ...BEN, ...CLEO];
+  check(
+    "cards: each window shows its own person's cards in full and none of the other two people's",
+    bodies.every((body, i) => ownOf[i].every((t) => body.includes(t)) && everyone.filter((t) => !ownOf[i].includes(t)).every((t) => !body.includes(t))),
+  );
+  const menus = await Promise.all([A, B, C].map((pg) => pg.getByLabel("Merge with a card that states the same fact").count()));
+  check("cards: with one Zeta pro card each, nobody is offered another person's card to merge with", menus.every((n) => n === 0), `${menus.join(", ")} menus`);
   await Promise.all([A, B, C].map((pg) => pg.waitForFunction(uniqueIs, 5, { timeout: 8000 })));
   const counters = await Promise.all([A, B, C].map((pg) => pg.getByTestId("unique-count").innerText()));
-  check("cards: the counter reads 5 in all three windows", counters.every((t) => /\b5\b/.test(t)), counters.map((t) => t.replace(/\s+/g, " ")).join(" | "));
+  check("cards: the counter reads 5 in all three windows (no pair is merged yet)", counters.every((t) => /\b5\b/.test(t)), counters.map((t) => t.replace(/\s+/g, " ")).join(" | "));
   check("cards: Ben never sees Ana's loud-office draft", !(await B.locator("main").innerText()).includes("loud in open offices"));
   await shootPage(A, path.join(SHOTS, "11-live-ana-cards.png"));
   await shootPage(B, path.join(SHOTS, "12-live-ben-cards.png"));
@@ -178,14 +205,33 @@ try {
   await snapBoth(C, "14-live-cleo-cards");
 
   // ---- merge, split, merge: the counter follows in the other window ---------------------------
-  // exact text: other cards list this wording inside their "Same fact as..." menu
-  const benCard = B.getByTestId("ledger-card").filter({ has: B.getByText("The Zeta battery gives two full days.", { exact: true }) });
-  const sameFact = { label: "Zeta lasts two days on a charge." }; // Ana's wording of Ben's fact
-  await benCard.getByLabel("Merge with a card that states the same fact").selectOption(sameFact);
-  live("Ben merges two wordings of one fact and Ana's counter drops from 5 to 3", await took(A, uniqueIs, 3));
-  await benCard.getByRole("button", { name: "Split" }).click();
+  // TEST ONLY. The screen no longer offers another person's card to merge with, so this pair is merged through the action
+  // itself, each card id read from its owner's own page. The server still merges across people; no screen and no chat
+  // agent reaches that any more (research/97, first item).
+  const act = (page, name, body) =>
+    page.evaluate(
+      async ([c, n, b]) => {
+        const token = window.localStorage.getItem(`unsaid:member:${c}`);
+        const r = await fetch(`/_agent-native/actions/${n}`, { method: "POST", headers: { "content-type": "application/json", "x-agent-native-frontend": "1" }, body: JSON.stringify({ code: c, token, ...b }) });
+        return { status: r.status, text: await r.text() };
+      },
+      [code, name, body],
+    );
+  const cardOf = (page, text) => page.getByTestId("ledger-card").filter({ has: page.getByText(text, { exact: true }) });
+  const keepId = await cardOf(B, BEN[0]).getAttribute("data-card-id");
+  const absorbId = await cardOf(A, ANA[0]).getAttribute("data-card-id");
+  const merged = await act(B, "merge-cards", { keepId, absorbId });
+  check("cards: test only: the merge action still joins Ben's card and Ana's across two people", merged.status === 200, `${merged.status} ${merged.text.slice(0, 80)}`);
+  live("Ben's and Ana's wordings of one fact are merged and Ana's counter drops from 5 to 3", await took(A, uniqueIs, 3));
+  await C.waitForFunction(othersAre, 3, { timeout: 8000 }); // the pair is one card now: Cleo's number goes 4 -> 3
+  const [aMerged, bMerged, cMerged] = await Promise.all([A, B, C].map((pg) => pg.locator("body").innerText()));
+  check(
+    "cards: after the merge Ana and Ben both see both wordings; Cleo sees only that her number dropped to 3",
+    [aMerged, bMerged].every((t) => t.includes(ANA[0]) && t.includes(BEN[0])) && !cMerged.includes(ANA[0]) && !cMerged.includes(BEN[0]),
+  );
+  await cardOf(B, BEN[0]).getByRole("button", { name: "Split" }).click();
   live("Ben undoes the merge and Ana's counter is back at 5", await took(A, uniqueIs, 5));
-  await benCard.getByLabel("Merge with a card that states the same fact").selectOption(sameFact);
+  await act(B, "merge-cards", { keepId, absorbId });
   await A.waitForFunction(uniqueIs, 3, { timeout: 8000 });
 
   // ---- both done: the room moves on by itself -------------------------------------------------
@@ -207,6 +253,8 @@ try {
   const weighRaw = JSON.parse(await raw(B, code));
   const bad = ["holders", "option", "polarity", "initialPick", "initialPicks", "vote", "votes", "scores", "ranking", "weights", "fullScore", "text"].filter((k) => keysDeep(weighRaw).has(k));
   check("weigh: the raw get-room data carries no option, holders, votes or scores", bad.length === 0, bad.join(", ") || `keys: ${[...keysDeep(weighRaw)].sort().join(",")}`);
+  const benWeigh = await B.getByTestId("weigh-card").count();
+  check("weigh: control: Ben, who had only his own 2 cards in the cards phase, now gets all 4 cards of the ledger", benWeigh === 4, `${benWeigh} cards`);
   const nA = await rateAll(A, [3, 1, 2, 3]);
   const nB = await rateAll(B, [0, 2, 3, 1]);
   const nC = await rateAll(C, [1, 3, 0, 2]);

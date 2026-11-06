@@ -67,8 +67,21 @@ try {
     await page.getByRole("button", { name: "Approve to ledger" }).first().click();
     await page.waitForFunction((k) => document.querySelectorAll('[data-testid="draft"]').length < k, n, { timeout: 10000 });
   }
+  // The simulated teammates hold 6 more facts that are theirs alone. In the cards phase they are a number, not text.
   const cards = await page.getByTestId("ledger-card").count();
-  check("cards: ledger holds 15 cards after approving", cards === 15, `${cards} cards`);
+  check("cards: my ledger lists the 9 cards I approved, not the others'", cards === 9, `${cards} cards`);
+  await page.waitForFunction(() => document.querySelector('[data-testid="others-card-count"]')?.getAttribute("data-count") === "6", null, { timeout: 5000 }).catch(() => {});
+  const othersLine = page.getByTestId("others-card-count");
+  check("cards: the others' cards are shown as a number only (6)", (await othersLine.getAttribute("data-count")) === "6" && /^6 cards approved by the others so far/.test((await othersLine.innerText()).trim()), (await othersLine.innerText()).trim());
+  const theirs = scenario.facts.filter((f) => !f.holders.includes("m1"));
+  const cardsPageText = await page.locator("body").innerText();
+  const cardsRawText = await rawRoom(page, code);
+  const seen = theirs.filter((f) => [f.text, f.neutral].some((t) => cardsPageText.includes(t) || cardsRawText.includes(t)));
+  check("cards: none of the 6 facts only the others knew is on the page or in the raw get-room answer", theirs.length === 6 && seen.length === 0, `${seen.length} of ${theirs.length} found`);
+  const menu = await page.getByLabel("Merge with a card that states the same fact").evaluateAll((sels) => sels.flatMap((s) => [...s.options].map((o) => o.textContent.trim()).filter((t) => t !== "Same fact as...")));
+  check("cards: control: a merge menu exists and offers only my own cards", menu.length > 0 && menu.every((t) => t.endsWith("(yours)")), `${menu.length} entries`);
+  const cardsRaw = JSON.parse(cardsRawText);
+  check("cards: the raw ledger holds only my own cards and carries the count", cardsRaw.ledger.length === 9 && cardsRaw.ledger.every((c) => c.mine === true) && cardsRaw.othersCardCount === 6, `${cardsRaw.ledger.length} cards; othersCardCount ${cardsRaw.othersCardCount}`);
   check("cards: my edited wording of a fact the others also knew is kept as an 'also worded' line", (await page.getByLabel("Merged wordings").getByText(edited, { exact: false }).count()) === 1);
   const unique = await page.getByTestId("unique-count").innerText();
   check("cards: counter says 9", /Facts only one of you knew:\s*9/.test(unique), unique.replace(/\s+/g, " "));
@@ -86,6 +99,8 @@ try {
   const weighText = (await page.getByTestId("weigh-card").allInnerTexts()).join("\n");
   const leaks = ["Kelvane", "Brightpane", "Cobbleline", "Noa", "Idris", "Known by"].filter((w) => weighText.includes(w));
   check("weigh: cards show no option name or holder", leaks.length === 0, leaks.join(", "));
+  const missing = theirs.filter((f) => !weighText.includes(f.neutral));
+  check("weigh: control: the 6 facts only the others knew are on the page now (neutral wording)", missing.length === 0, `${theirs.length - missing.length} of ${theirs.length} found`);
   const bodyText = await page.locator("main").innerText();
   check("weigh: no ledger totals or scores on the page", !/Scores by option|Full ledger|points to|own facts only/i.test(bodyText));
   const RATINGS = [3, 2, 1, 0, 3, 2, 1, 2, 3, 1, 2, 3, 0, 1, 2];

@@ -109,7 +109,10 @@ export interface RoomView {
   uniqueCount: number | null;
   notes: string | null;
   drafts: DraftView[] | null;
+  /** Cards phase: the caller's own approved cards only. Vote phase: every card. */
   ledger: LedgerCardView[] | null;
+  /** Cards phase only: how many approved cards the caller does not hold (a number, nothing about them). */
+  othersCardCount: number | null;
   weigh: WeighView | null;
   reveal: RevealView | null;
 }
@@ -135,6 +138,7 @@ export function viewRoom(room: Room, me: Member, opts: { agent?: boolean } = {})
   const myRatings = room.ratings[me.id] ?? {};
   const myGuesses = opts.agent ? {} : (room.whoGuesses?.[me.id] ?? {});
   const phase = room.phase;
+  const ownCards = room.cards.filter((c) => holdersOf(c).includes(me.id));
   const ledgerCard = (c: Card, vote: boolean): LedgerCardView => {
     const holders = holdersOf(c);
     const guessable = vote && guessTarget(room, c, me.id) !== null;
@@ -177,10 +181,13 @@ export function viewRoom(room: Room, me: Member, opts: { agent?: boolean } = {})
             .filter((d) => d.ownerId === me.id)
             .map((d) => ({ id: d.id, option: d.option, polarity: d.polarity, text: d.text, neutral: d.neutral, origin: d.origin, phrase: d.phrase, ready: d.option !== null && d.polarity !== null, leak: mayNameOption(d.neutral, room.options) }))
         : null,
+    // Cards phase: only the caller's own cards, in full. The others' cards show as a number and reach the screen when the
+    // room moves on to weigh; seen live, a card appearing just after someone approved it would tell who wrote it.
     // Cards show their option before the blind weigh and after it, never during. Never who holds them (only whether
     // the caller does, and how many do) until the reveal. The vote list is shuffled (same order for everyone, stable
     // per room) so the order the cards were approved in cannot tell who wrote which.
-    ledger: phase === "cards" ? room.cards.map((c) => ledgerCard(c, false)) : phase === "vote" ? seededShuffle(room.cards, `${room.seed}:vote`).map((c) => ledgerCard(c, true)) : null,
+    ledger: phase === "cards" ? ownCards.map((c) => ledgerCard(c, false)) : phase === "vote" ? seededShuffle(room.cards, `${room.seed}:vote`).map((c) => ledgerCard(c, true)) : null,
+    othersCardCount: phase === "cards" ? room.cards.length - ownCards.length : null,
     weigh: null,
     reveal: null,
   };

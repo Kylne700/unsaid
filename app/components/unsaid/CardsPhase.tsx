@@ -179,8 +179,11 @@ function NewDraft() {
 }
 
 function LedgerItem({ c, all }: { c: LedgerCardView; all: LedgerCardView[] }) {
-  const { run } = useRoomCtx();
-  const only = c.holderCount === 1;
+  const { run, room } = useRoomCtx();
+  // A live room shows only your own cards in this phase, so "only you knew this" cannot be told yet: it shows from two
+  // holders on. A practice room knows every fact, so there it holds from the start.
+  const known = room.practice !== null || c.holderCount > 1;
+  const only = room.practice !== null && c.holderCount === 1;
   const same = all.filter((o) => o.id !== c.id && o.option === c.option && o.polarity === c.polarity && (c.mine || o.mine));
   return (
     <li className={cn("rounded-lg border bg-card p-3 text-sm", only && "border-amber-500/60")} data-testid="ledger-card" data-card-id={c.id} data-holders={c.holderCount}>
@@ -188,12 +191,14 @@ function LedgerItem({ c, all }: { c: LedgerCardView; all: LedgerCardView[] }) {
         <PolarityMark polarity={c.polarity} />
         <p className="flex-1 leading-snug">{c.text}</p>
       </div>
-      <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-        <span>
-          Known by <span className="font-medium text-foreground">{knownBy(c.mine, c.holderCount)}</span>
-        </span>
-        {only ? <Tag className="border-amber-500/50 bg-amber-500/10 text-amber-800 dark:text-amber-200">{c.mine ? "only you knew this" : "only one person knew this"}</Tag> : null}
-      </p>
+      {known ? (
+        <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          <span>
+            Known by <span className="font-medium text-foreground">{knownBy(c.mine, c.holderCount)}</span>
+          </span>
+          {only ? <Tag className="border-amber-500/50 bg-amber-500/10 text-amber-800 dark:text-amber-200">{c.mine ? "only you knew this" : "only one person knew this"}</Tag> : null}
+        </p>
+      ) : null}
       {c.merged.length ? (
         <ul className="mt-2 space-y-1 border-l-2 pl-3 text-xs text-muted-foreground" aria-label="Merged wordings">
           {c.merged.map((m) => (
@@ -245,6 +250,7 @@ export function CardsPhase() {
   const { room, run } = useRoomCtx();
   const drafts = room.drafts ?? [];
   const ledger = room.ledger ?? [];
+  const othersCount = room.othersCardCount ?? 0;
   const [extractNote, setExtractNote] = useState<string | null>(null);
 
   async function extract() {
@@ -296,10 +302,13 @@ export function CardsPhase() {
       </section>
 
       <section aria-labelledby="ledger-title">
-        <SectionTitle hint="Everyone sees the approved cards and how many people knew each one, but not who. Same fact in other words? Merge the cards; Split undoes it.">
-          <span id="ledger-title">Shared ledger</span>
+        <SectionTitle hint="The cards you approved. The cards the others approve stay hidden until the room moves on to weigh; you see only how many there are.">
+          <span id="ledger-title">Your approved cards</span>
         </SectionTitle>
-        {ledger.length === 0 ? <p className="text-sm text-muted-foreground">No approved cards yet.</p> : null}
+        <p className="mb-3 text-sm text-muted-foreground" data-testid="others-card-count" data-count={othersCount} aria-live="polite">
+          {othersCount === 0 ? "The others have not approved any cards yet." : `${othersCount} card${othersCount === 1 ? "" : "s"} approved by the others so far.`}
+        </p>
+        {ledger.length === 0 ? <p className="text-sm text-muted-foreground">You have not approved any cards yet.</p> : null}
         <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${room.options.length}, minmax(0, 1fr))` }}>
           {room.options.map((o) => {
             const cards = [...ledger.filter((c) => c.option === o.id)].sort((a, b) => (a.polarity === b.polarity ? 0 : a.polarity === "pro" ? -1 : 1));

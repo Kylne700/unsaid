@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { approveDraft, castVote, createPractice, createRoom, deleteDraft, joinRoom, memberByToken, rateCard, saveDraft, setDone, setInitialPick } from "./room";
+import { holdersOf } from "./ledger";
 import type { Member, Phase, Room } from "./types";
 import { buildRoom as build, DRAFT, expectSealed, must, NOTES } from "./test-helpers";
 import { guestView, viewRoom, type RoomView } from "./view";
@@ -120,9 +121,37 @@ describe("the ledger is anonymous until the reveal", () => {
       }
     }
     // only the counts: Ben and Cy's merged card has two holders, its merged part one, and Ana is on neither
-    const merged = must(must(asView(t.room, t.ana).ledger).find((c) => c.merged.length));
-    expect([merged.mine, merged.holderCount, merged.merged[0]?.mine, merged.merged[0]?.holderCount]).toEqual([false, 2, false, 1]);
+    const anaList = must(asView(t.room, t.ana).ledger);
+    if (phase === "cards") expect(anaList.some((c) => c.merged.length), "cards: Ana does not hold the merged card, so her list has none").toBe(false);
+    else {
+      const merged = must(anaList.find((c) => c.merged.length));
+      expect([merged.mine, merged.holderCount, merged.merged[0]?.mine, merged.merged[0]?.holderCount]).toEqual([false, 2, false, 1]);
+    }
     expect(must(must(asView(t.room, t.cy).ledger).find((c) => c.merged.length)).merged[0]).toMatchObject({ mine: true, holderCount: 1 });
+  });
+
+  it("cards: a member gets their own approved cards in full and only a number for the others; the vote list then holds all of them", () => {
+    const t = build("cards", { merge: true });
+    for (const m of t.all) {
+      const v = asView(t.room, m);
+      const own = t.room.cards.filter((c) => holdersOf(c).includes(m.id));
+      const others = t.room.cards.filter((c) => !holdersOf(c).includes(m.id));
+      expect(must(v.ledger).map((c) => c.id).sort(), `${m.name}: own cards`).toEqual(own.map((c) => c.id).sort());
+      expect(must(v.ledger).every((c) => c.mine), `${m.name}: every listed card is theirs`).toBe(true);
+      expect(v.othersCardCount, `${m.name}: number of the others' cards`).toBe(others.length);
+      const json = JSON.stringify(v);
+      for (const c of others) {
+        for (const secret of [c.id, c.text, ...c.absorbed.flatMap((a) => [a.id, a.text])]) expect(json, `${m.name} must not see ${secret}`).not.toContain(secret);
+      }
+      // the chat agent gets exactly the same
+      expect(JSON.stringify(viewRoom(t.room, m, { agent: true })), `${m.name}: agent view`).toBe(json);
+    }
+    // positive control: the same strings do reach the screen once the room is at the vote list
+    const later = build("vote", { merge: true });
+    const vote = asView(later.room, later.ana);
+    expect(must(vote.ledger)).toHaveLength(7);
+    expect(vote.othersCardCount).toBeNull();
+    expect(JSON.stringify(vote)).toContain("Berlin rents are rising.");
   });
 
   it("vote: the list is shuffled so the order the cards were approved in tells nothing; the same for everyone, stable per poll", () => {
@@ -146,15 +175,16 @@ describe("notes and draft cards go only to their owner", () => {
     expect(JSON.stringify(asView(t.room, t.ben))).not.toContain("ANA-NOTES-SENTINEL");
   });
 
-  it("cards phase: drafts and notes are the caller's own; approved cards are shared", () => {
+  it("cards phase: drafts, notes and approved cards are the caller's own; the others' approved cards are a number", () => {
     const t = build("cards");
     const a = asView(t.room, t.ana);
     expect(a.drafts?.map((d) => d.text)).toEqual([DRAFT.ana]);
     expect(a.notes).toBe(NOTES.ana);
     const json = JSON.stringify(a);
     for (const other of ["BEN-DRAFT-SENTINEL", "CY-DRAFT-SENTINEL", "BEN-NOTES-SENTINEL", "CY-NOTES-SENTINEL"]) expect(json).not.toContain(other);
-    expect(a.ledger).toHaveLength(8); // everyone's approved cards
-    expect(a.ledger?.some((c) => c.text === "Berlin rents are rising.")).toBe(true);
+    expect(a.ledger?.map((c) => c.text)).toEqual(["Lisbon has cheap flights.", "Lisbon summers are very hot.", "Oslo has great transit."]); // Ana's three
+    expect(a.othersCardCount).toBe(5); // Ben's three and Cy's two
+    expect(json).not.toContain("Berlin rents are rising.");
     expect(a.uniqueCount).toBe(8); // no card has two holders yet
   });
 

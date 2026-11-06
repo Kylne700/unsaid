@@ -156,11 +156,19 @@ describe("get-room gives every caller the same sealed view", () => {
       const made = await call(saveDraft, { ...both(r.code, token), text, option, polarity });
       await call(approveDraft, { ...both(r.code, token), draftId: made.draftId });
     }
-    const ledger = (await r.view(r.who.ana)).ledger as AnyView[];
-    expect(ledger).toHaveLength(5);
-    const [x, y] = [ledger.find((c) => c.text === "Lisbon has cheap flights."), ledger.find((c) => c.text === "Lisbon cheap flights.")];
+    // 5 approved cards. Each member's view holds only their own, the others come as a number (and no text of theirs)
+    const anaCards = (await r.view(r.who.ana)).ledger as AnyView[];
+    const cyCards = (await r.view(r.who.cy)).ledger as AnyView[];
+    expect(anaCards.map((c) => c.text)).toEqual(["Lisbon has cheap flights."]);
+    expect(cyCards.map((c) => c.text).sort()).toEqual(["Lisbon cheap flights.", "Oslo is dark in winter."]);
+    expect([(await r.view(r.who.ana)).othersCardCount, (await r.view(r.who.ben)).othersCardCount, (await r.view(r.who.cy)).othersCardCount]).toEqual([4, 3, 3]);
+    expect(JSON.stringify(await r.view(r.who.ana))).not.toMatch(/Berlin rents|Berlin has a big tech|Oslo is dark|Lisbon cheap flights/);
+    // The merge itself still works on the server. A member cannot read another member's card id from any view, so the test
+    // hands over Cy's id from Cy's own view (Ana's view of that same moment holds none of it).
+    const [x, y] = [anaCards.find((c) => c.text === "Lisbon has cheap flights."), cyCards.find((c) => c.text === "Lisbon cheap flights.")];
     await call(mergeCards, { ...both(r.code, r.who.ana), keepId: must(x).id, absorbId: must(y).id });
-    expect(((await r.view(r.who.ana)).ledger as AnyView[]).length).toBe(4);
+    expect(((await r.view(r.who.ana)).ledger as AnyView[]).map((c) => c.holderCount)).toEqual([2]); // the merged card, held by Ana and Cy
+    expect((await r.view(r.who.ana)).othersCardCount).toBe(3); // 4 cards in the room now, Ana holds 1
     expect((await r.view(r.who.ana)).uniqueCount).toBe(3); // the merged card has two holders
     await agent(r.code, r.who.ana, advancePhase, {}); // the creator moves the room on
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { approveDraft, castVote, createPractice, createRoom, deleteDraft, joinRoom, memberByToken, rateCard, saveDraft, setDone, setInitialPick } from "./room";
 import { holdersOf } from "./ledger";
 import type { Member, Phase, Room } from "./types";
-import { buildRoom as build, DRAFT, expectSealed, must, NOTES } from "./test-helpers";
+import { buildRoom as build, DRAFT, expectSealed, keysDeep, must, NOTES } from "./test-helpers";
 import { guestView, viewRoom, type RoomView } from "./view";
 
 const asView = (room: Room, m: Member): RoomView => viewRoom(room, m);
@@ -37,7 +37,7 @@ describe("the seal, phase by phase (view level)", () => {
     const weigh = must(a.weigh);
     expect(weigh.total).toBe(8);
     expect(weigh.cards).toHaveLength(8);
-    for (const c of weigh.cards) expect(Object.keys(c).sort()).toEqual(["id", "myRating", "neutral"]);
+    for (const c of weigh.cards) expect(Object.keys(c).sort()).toEqual(["id", "mine", "myRating", "neutral"]);
     const text = JSON.stringify(weigh);
     for (const word of ["Lisbon", "Berlin", "Oslo", "Ana", "Ben", "Cy", "holders", "polarity"]) expect(text, word).not.toMatch(new RegExp(`\\b${word}\\b`, "i"));
     expect(weigh.cards.some((c) => /this option/i.test(c.neutral))).toBe(true);
@@ -46,6 +46,19 @@ describe("the seal, phase by phase (view level)", () => {
     expect(order(t.ana)).toEqual(order(t.ana)); // same list on every poll
     expect(order(t.ana)).not.toEqual(order(t.ben)); // different list per member (fixed seed)
     expect([...order(t.ana)].sort()).toEqual([...order(t.ben)].sort());
+  });
+
+  it("weigh: `mine` marks the cards the caller holds; a merge in weigh adds no holder count and names nobody", () => {
+    const t = build("weigh", { merge: true });
+    expect(must(asView(t.room, t.ana).weigh).total).toBe(7);
+    const mineCount = (m: Member) => must(asView(t.room, m).weigh).cards.filter((c) => c.mine).length;
+    expect(t.all.map(mineCount)).toEqual([3, 3, 2]); // the merged card is Ben's and Cy's
+    for (const m of t.all) {
+      const weigh = must(asView(t.room, m).weigh);
+      for (const c of weigh.cards) expect(c.mine, `${m.name}/${c.id}`).toBe(holdersOf(must(t.room.cards.find((x) => x.id === c.id))).includes(m.id));
+      const keys = keysDeep(weigh);
+      for (const k of ["by", "absorbed", "merged", "ownHolders", "holders", "holderCount"]) expect(keys.has(k), `${m.name}: key ${k}`).toBe(false);
+    }
   });
 
   it("weigh: a member sees only their own rating", () => {
@@ -87,19 +100,26 @@ describe("the seal, phase by phase (view level)", () => {
 /** The same room, but the two other members have traded every card they hold (nothing the viewer holds or counts changes). */
 function swapOthers(room: Room, a: Member, b: Member): Room {
   const copy = JSON.parse(JSON.stringify(room)) as Room;
-  const swap = (ids: string[]) => ids.map((id) => (id === a.id ? b.id : id === b.id ? a.id : id));
+  const swapId = (id: string) => (id === a.id ? b.id : id === b.id ? a.id : id);
+  const swap = (ids: string[]) => ids.map(swapId);
   for (const c of copy.cards) {
     c.ownHolders = swap(c.ownHolders);
-    for (const p of c.absorbed) p.ownHolders = swap(p.ownHolders);
+    for (const p of c.absorbed) {
+      p.ownHolders = swap(p.ownHolders);
+      p.by = swapId(p.by); // who merged is stored, and no view may show it
+    }
   }
   return copy;
 }
+
+/** A merge each phase can hold: Ben folds two of his own cards in the cards phase; from weigh on, Cy folds a card into Ben's. */
+const mergedOpts = (phase: Phase) => (phase === "notes" ? {} : phase === "cards" ? { ownMerge: true } : { merge: true });
 
 describe("the ledger is anonymous until the reveal", () => {
   const seats = (t: ReturnType<typeof build>) => [[t.ana, t.ben, t.cy], [t.ben, t.ana, t.cy], [t.cy, t.ana, t.ben]] as const;
 
   it.each(["notes", "cards", "weigh", "vote"] as Phase[])("%s: if the other two members had held each other's cards, nobody's view would differ", (phase) => {
-    const t = build(phase, { merge: true });
+    const t = build(phase, mergedOpts(phase));
     for (const [viewer, a, b] of seats(t)) {
       const swapped = swapOthers(t.room, a, b);
       if (t.room.cards.length) expect(JSON.stringify(swapped.cards), `${phase}: the swap must change something`).not.toBe(JSON.stringify(t.room.cards));
@@ -109,7 +129,7 @@ describe("the ledger is anonymous until the reveal", () => {
   });
 
   it.each(["cards", "vote"] as Phase[])("%s: a ledger card or merged part names nobody and carries nobody's id", (phase) => {
-    const t = build(phase, { merge: true });
+    const t = build(phase, mergedOpts(phase));
     for (const m of t.all) {
       const v = asView(t.room, m);
       const { members: _members, me: _me, ...rest } = v;
@@ -120,18 +140,21 @@ describe("the ledger is anonymous until the reveal", () => {
         }
       }
     }
-    // only the counts: Ben and Cy's merged card has two holders, its merged part one, and Ana is on neither
+    // only the counts. Cards phase: Ben's own merge has one holder and Ana's list has none. Vote: Ben and Cy's merged card has two holders, its merged part one, and Ana is on neither.
     const anaList = must(asView(t.room, t.ana).ledger);
-    if (phase === "cards") expect(anaList.some((c) => c.merged.length), "cards: Ana does not hold the merged card, so her list has none").toBe(false);
-    else {
+    if (phase === "cards") {
+      expect(anaList.some((c) => c.merged.length), "cards: Ana does not hold the merged card, so her list has none").toBe(false);
+      expect(must(must(asView(t.room, t.ben).ledger).find((c) => c.merged.length)).merged[0]).toMatchObject({ mine: true, holderCount: 1 });
+    } else {
       const merged = must(anaList.find((c) => c.merged.length));
       expect([merged.mine, merged.holderCount, merged.merged[0]?.mine, merged.merged[0]?.holderCount]).toEqual([false, 2, false, 1]);
+      expect(must(must(asView(t.room, t.cy).ledger).find((c) => c.merged.length)).merged[0]).toMatchObject({ mine: true, holderCount: 1 });
     }
-    expect(must(must(asView(t.room, t.cy).ledger).find((c) => c.merged.length)).merged[0]).toMatchObject({ mine: true, holderCount: 1 });
   });
 
   it("cards: a member gets their own approved cards in full and only a number for the others; the vote list then holds all of them", () => {
-    const t = build("cards", { merge: true });
+    const t = build("cards", { ownMerge: true });
+    expect(t.room.cards.some((c) => c.absorbed.length), "the room has a merged part to hide").toBe(true);
     for (const m of t.all) {
       const v = asView(t.room, m);
       const own = t.room.cards.filter((c) => holdersOf(c).includes(m.id));
@@ -146,7 +169,8 @@ describe("the ledger is anonymous until the reveal", () => {
       // the chat agent gets exactly the same
       expect(JSON.stringify(viewRoom(t.room, m, { agent: true })), `${m.name}: agent view`).toBe(json);
     }
-    // positive control: the same strings do reach the screen once the room is at the vote list
+    // positive controls: the merged part reaches its holder, and the other strings reach everyone once the room is at the vote list
+    expect(JSON.stringify(asView(t.room, t.ben))).toContain("Berlin has many startups.");
     const later = build("vote", { merge: true });
     const vote = asView(later.room, later.ana);
     expect(must(vote.ledger)).toHaveLength(7);

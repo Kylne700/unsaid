@@ -62,8 +62,8 @@ export interface LedgerCardView {
 export interface WeighView {
   total: number;
   rated: number;
-  /** Shuffled per member. Neutral text only: no option, no holder, no total. */
-  cards: { id: string; neutral: string; myRating: number | null }[];
+  /** Shuffled per member. Neutral text only: no option, no holder count, no total. `mine`: the caller holds this card (those are the ones to fold into another card). */
+  cards: { id: string; neutral: string; mine: boolean; myRating: number | null }[];
 }
 export interface RevealView {
   disclaimer: string;
@@ -198,7 +198,10 @@ export function viewRoom(room: Room, me: Member, opts: { agent?: boolean } = {})
     view.weigh = {
       total: room.cards.length,
       rated: room.cards.filter((c) => myRatings[c.id] !== undefined).length,
-      cards: order.map((id) => ({ id, neutral: (byId.get(id) as Card).neutral, myRating: myRatings[id] ?? null })),
+      cards: order.map((id) => {
+        const c = byId.get(id) as Card;
+        return { id, neutral: c.neutral, mine: holdersOf(c).includes(me.id), myRating: myRatings[id] ?? null };
+      }),
     };
   }
   if (phase === "reveal") view.reveal = revealView(room, me, opts.agent === true);

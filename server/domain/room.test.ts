@@ -98,7 +98,6 @@ describe("phase machine", () => {
     throwsKind(() => castVote(t.room, t.ana, "A"), "bad_phase");
     forceAdvance(t.room, t.ana); // weigh
     throwsKind(() => saveDraft(t.room, t.ana, { text: "x", option: null, polarity: null }), "bad_phase");
-    throwsKind(() => mergeCards(t.room, t.ana, c.id, c.id), "bad_phase");
     throwsKind(() => rateCard(t.room, t.ana, c.id, 4), "invalid");
   });
 
@@ -139,25 +138,38 @@ describe("cards, merge and the unique count", () => {
     expect(auto.neutral).toBe("This option is dark in winter.");
   });
 
-  it("merge unions the holders, unmerge restores both cards, and the unique count follows", () => {
+  it("cards phase: a member merges two of their own cards, unmerge restores both, and the unique count follows", () => {
+    const t = live();
+    forceAdvance(t.room, t.ana);
+    const x = card(t.room, t.ana, "Lisbon flights are cheap.", "A", "pro");
+    const y = card(t.room, t.ana, "Cheap flights to Lisbon.", "A", "pro"); // Ana wrote the same fact twice
+    const hot = card(t.room, t.ana, "Lisbon is hot.", "A", "con");
+    card(t.room, t.cy, "Oslo is expensive.", "C", "con");
+    expect(uniqueCount(t.room.cards)).toBe(4);
+
+    throwsKind(() => mergeCards(t.room, t.ana, x.id, hot.id), "conflict"); // same option, but a con is not a pro
+    throwsKind(() => mergeCards(t.room, t.ana, x.id, x.id), "invalid");
+    mergeCards(t.room, t.ana, x.id, y.id);
+    expect(t.room.cards).toHaveLength(3);
+    expect(holdersOf(x)).toEqual([t.ana.id]);
+    expect(uniqueCount(t.room.cards)).toBe(3);
+
+    unmergeCard(t.room, t.ana, x.id, y.id);
+    expect(t.room.cards).toHaveLength(4);
+    expect(holdersOf(must(t.room.cards.find((c) => c.id === y.id)))).toEqual([t.ana.id]);
+    expect(uniqueCount(t.room.cards)).toBe(4);
+  });
+
+  it("cards phase: nobody can merge across members, because the others' cards are not visible yet", () => {
     const t = live();
     forceAdvance(t.room, t.ana);
     const x = card(t.room, t.ana, "Lisbon flights are cheap.", "A", "pro");
     const y = card(t.room, t.ben, "Cheap flights to Lisbon.", "A", "pro");
-    const z = card(t.room, t.cy, "Oslo is expensive.", "C", "con");
-    expect(uniqueCount(t.room.cards)).toBe(3);
-
-    throwsKind(() => mergeCards(t.room, t.ana, x.id, z.id), "conflict"); // different option and side
+    const mine = card(t.room, t.ana, "Cheap Lisbon airfares.", "A", "pro");
+    throwsKind(() => mergeCards(t.room, t.ana, x.id, y.id), "forbidden"); // absorbing Ben's card
+    throwsKind(() => mergeCards(t.room, t.ana, y.id, mine.id), "bad_phase"); // folding her own card into Ben's, before weigh
     throwsKind(() => mergeCards(t.room, t.cy, x.id, y.id), "forbidden"); // Cy holds neither
-    mergeCards(t.room, t.ana, x.id, y.id);
-    expect(t.room.cards).toHaveLength(2);
-    expect(holdersOf(x).sort()).toEqual([t.ana.id, t.ben.id].sort());
-    expect(uniqueCount(t.room.cards)).toBe(1); // only Cy's card is single-holder now
-
-    unmergeCard(t.room, t.ben, x.id, y.id);
     expect(t.room.cards).toHaveLength(3);
-    expect(holdersOf(x)).toEqual([t.ana.id]);
-    expect(holdersOf(must(t.room.cards.find((c) => c.id === y.id)))).toEqual([t.ben.id]);
     expect(uniqueCount(t.room.cards)).toBe(3);
   });
 
@@ -165,14 +177,14 @@ describe("cards, merge and the unique count", () => {
     const t = live();
     forceAdvance(t.room, t.ana);
     const x = card(t.room, t.ana, "Berlin is lively.", "B", "pro");
-    const y = card(t.room, t.ben, "Berlin has nightlife.", "B", "pro");
-    const z = card(t.room, t.cy, "Berlin feels alive.", "B", "pro");
+    const y = card(t.room, t.ana, "Berlin has nightlife.", "B", "pro");
+    const z = card(t.room, t.ana, "Berlin feels alive.", "B", "pro");
     mergeCards(t.room, t.ana, x.id, y.id);
     mergeCards(t.room, t.ana, x.id, z.id);
-    expect(holdersOf(x)).toHaveLength(3);
+    expect(x.absorbed).toHaveLength(2);
     throwsKind(() => withdrawCard(t.room, t.ana, x.id), "conflict"); // split first
-    unmergeCard(t.room, t.cy, x.id, z.id);
-    expect(holdersOf(x).sort()).toEqual([t.ana.id, t.ben.id].sort());
+    unmergeCard(t.room, t.ana, x.id, z.id);
+    expect(x.absorbed.map((a) => a.id)).toEqual([y.id]);
     expect(t.room.cards).toHaveLength(2);
   });
 
@@ -206,6 +218,104 @@ describe("cards, merge and the unique count", () => {
     withdrawCard(t.room, t.ana, x.id);
     expect(t.room.cards).toHaveLength(0);
     expect(t.room.drafts.filter((d) => d.ownerId === t.ana.id)).toHaveLength(1);
+  });
+});
+
+/** Ana and Ben wrote the same Lisbon pro (x, y); Ben also wrote a Lisbon con (v) and Cy an Oslo con (z). The room is in the weigh phase. */
+function weighRoom() {
+  const t = live();
+  forceAdvance(t.room, t.ana);
+  const x = card(t.room, t.ana, "Lisbon flights are cheap.", "A", "pro");
+  const y = card(t.room, t.ben, "Cheap flights to Lisbon.", "A", "pro");
+  const v = card(t.room, t.ben, "Lisbon is hot.", "A", "con");
+  const z = card(t.room, t.cy, "Oslo is expensive.", "C", "con");
+  forceAdvance(t.room, t.ana);
+  return { ...t, x, y, v, z };
+}
+
+describe("merging a duplicate in the weigh phase", () => {
+  it("a member folds their own card into someone else's: both hold it, the unique count follows, splitting is a cards-phase move", () => {
+    const t = weighRoom();
+    expect(uniqueCount(t.room.cards)).toBe(4);
+    mergeCards(t.room, t.ben, t.x.id, t.y.id); // Ben says his wording is Ana's fact
+    expect(t.room.cards.map((c) => c.id)).toEqual([t.x.id, t.v.id, t.z.id]);
+    expect(holdersOf(t.x).sort()).toEqual([t.ana.id, t.ben.id].sort());
+    expect(t.x.absorbed.map((a) => a.id)).toEqual([t.y.id]);
+    expect(uniqueCount(t.room.cards)).toBe(2); // only Ben's con and Cy's card are single-holder now
+    throwsKind(() => unmergeCard(t.room, t.ben, t.x.id, t.y.id), "bad_phase");
+    expect(t.room.cards).toHaveLength(3);
+  });
+
+  it("only a card the caller holds can be folded away", () => {
+    const t = weighRoom();
+    throwsKind(() => mergeCards(t.room, t.ana, t.x.id, t.y.id), "forbidden"); // Ana would absorb Ben's card
+    throwsKind(() => mergeCards(t.room, t.cy, t.x.id, t.y.id), "forbidden"); // Cy holds neither
+    throwsKind(() => mergeCards(t.room, t.cy, t.y.id, t.x.id), "forbidden");
+    expect(t.room.cards).toHaveLength(4);
+  });
+
+  it("the folded card's own merged parts travel with it", () => {
+    const t = live();
+    forceAdvance(t.room, t.ana);
+    const x = card(t.room, t.ana, "Lisbon flights are cheap.", "A", "pro");
+    const y = card(t.room, t.ben, "Cheap flights to Lisbon.", "A", "pro");
+    const y2 = card(t.room, t.ben, "Lisbon airfares are low.", "A", "pro");
+    mergeCards(t.room, t.ben, y.id, y2.id); // both his, in the cards phase
+    forceAdvance(t.room, t.ana);
+    mergeCards(t.room, t.ben, x.id, y.id);
+    expect(x.absorbed.map((a) => a.id)).toEqual([y.id, y2.id]);
+    expect(t.room.cards).toHaveLength(1);
+  });
+
+  it("the two cards must be about the same option and the same side", () => {
+    const t = weighRoom();
+    throwsKind(() => mergeCards(t.room, t.ben, t.x.id, t.v.id), "conflict"); // a pro and a con
+    throwsKind(() => mergeCards(t.room, t.cy, t.x.id, t.z.id), "conflict"); // another option
+    throwsKind(() => mergeCards(t.room, t.ben, t.y.id, t.y.id), "invalid");
+    throwsKind(() => mergeCards(t.room, t.ben, "nope", t.y.id), "not_found");
+    expect(t.room.cards).toHaveLength(4);
+  });
+
+  it("is refused in the notes, vote and reveal phases", () => {
+    const n = live();
+    throwsKind(() => mergeCards(n.room, n.ana, "x", "y"), "bad_phase");
+    const t = weighRoom();
+    forceAdvance(t.room, t.ana); // vote
+    throwsKind(() => mergeCards(t.room, t.ben, t.x.id, t.y.id), "bad_phase");
+    for (const m of all(t)) castVote(t.room, m, "A");
+    expect(t.room.phase).toBe("reveal");
+    throwsKind(() => mergeCards(t.room, t.ben, t.x.id, t.y.id), "bad_phase");
+    expect(t.room.cards).toHaveLength(4);
+  });
+
+  it("ratings on the folded card move to the surviving card unless that member already rated it, and none stay behind", () => {
+    const t = weighRoom();
+    rateCard(t.room, t.ana, t.y.id, 3); // Ana rated only Ben's wording
+    rateCard(t.room, t.ben, t.y.id, 2); // Ben rated his own wording, not Ana's
+    rateCard(t.room, t.cy, t.x.id, 1); // Cy rated both: the surviving card's rating wins
+    rateCard(t.room, t.cy, t.y.id, 3);
+    mergeCards(t.room, t.ben, t.x.id, t.y.id);
+    expect(all(t).map((m) => t.room.ratings[m.id]?.[t.x.id])).toEqual([3, 2, 1]);
+    for (const m of all(t)) expect(Object.keys(t.room.ratings[m.id] ?? {}), m.name).not.toContain(t.y.id);
+  });
+
+  it("a rating of 0 moves like any other and is never overwritten", () => {
+    const t = weighRoom();
+    rateCard(t.room, t.ana, t.y.id, 0); // moves: Ana has not rated the surviving card
+    rateCard(t.room, t.cy, t.x.id, 0); // stays: Cy rated the surviving card 0 and the folded one 3
+    rateCard(t.room, t.cy, t.y.id, 3);
+    mergeCards(t.room, t.ben, t.x.id, t.y.id);
+    expect(t.room.ratings[t.ana.id]?.[t.x.id]).toBe(0);
+    expect(t.room.ratings[t.cy.id]?.[t.x.id]).toBe(0);
+  });
+
+  it("a member who rated every remaining card can then mark done, with the rating they gave the folded card counting for the survivor", () => {
+    const t = weighRoom();
+    for (const id of [t.y.id, t.v.id, t.z.id]) rateCard(t.room, t.ana, id, 2); // Ana never rated x
+    throwsKind(() => setDone(t.room, t.ana, true), "invalid");
+    mergeCards(t.room, t.ben, t.x.id, t.y.id);
+    setDone(t.room, t.ana, true);
+    expect(t.ana.done).toBe(true);
   });
 });
 

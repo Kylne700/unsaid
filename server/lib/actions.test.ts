@@ -163,23 +163,41 @@ describe("get-room gives every caller the same sealed view", () => {
     expect(cyCards.map((c) => c.text).sort()).toEqual(["Lisbon cheap flights.", "Oslo is dark in winter."]);
     expect([(await r.view(r.who.ana)).othersCardCount, (await r.view(r.who.ben)).othersCardCount, (await r.view(r.who.cy)).othersCardCount]).toEqual([4, 3, 3]);
     expect(JSON.stringify(await r.view(r.who.ana))).not.toMatch(/Berlin rents|Berlin has a big tech|Oslo is dark|Lisbon cheap flights/);
-    // The merge itself still works on the server. A member cannot read another member's card id from any view, so the test
-    // hands over Cy's id from Cy's own view (Ana's view of that same moment holds none of it).
+    // Across members a merge is a weigh-phase move: before it, Ana can neither absorb Cy's card nor fold her own into it. A member cannot
+    // read another member's card id from any view, so the test hands over Cy's id from Cy's own view (Ana's view of that moment holds none of it).
     const [x, y] = [anaCards.find((c) => c.text === "Lisbon has cheap flights."), cyCards.find((c) => c.text === "Lisbon cheap flights.")];
-    await call(mergeCards, { ...both(r.code, r.who.ana), keepId: must(x).id, absorbId: must(y).id });
-    expect(((await r.view(r.who.ana)).ledger as AnyView[]).map((c) => c.holderCount)).toEqual([2]); // the merged card, held by Ana and Cy
-    expect((await r.view(r.who.ana)).othersCardCount).toBe(3); // 4 cards in the room now, Ana holds 1
-    expect((await r.view(r.who.ana)).uniqueCount).toBe(3); // the merged card has two holders
+    await expect(call(mergeCards, { ...both(r.code, r.who.ana), keepId: must(x).id, absorbId: must(y).id })).rejects.toMatchObject({ errorCode: "forbidden", statusCode: 403 });
+    await expect(call(mergeCards, { ...both(r.code, r.who.ana), keepId: must(y).id, absorbId: must(x).id })).rejects.toMatchObject({ errorCode: "bad_phase", statusCode: 409 });
+    expect(((await r.view(r.who.ana)).ledger as AnyView[]).map((c) => c.holderCount)).toEqual([1]); // nothing merged
+    expect((await r.view(r.who.ana)).othersCardCount).toBe(4);
+    expect((await r.view(r.who.ana)).uniqueCount).toBe(5);
     await agent(r.code, r.who.ana, advancePhase, {}); // the creator moves the room on
 
     // weigh: nothing about the cards but neutral text
     const weigh = await checkPhase("weigh");
     expect(weigh.ledger).toBeNull();
+    expect(weigh.weigh.total).toBe(5);
     expect(JSON.stringify(weigh.weigh)).not.toMatch(/Lisbon|Berlin|Oslo|"holders"|"option"/);
+    // The first moment members can see each other's cards, so duplicates are merged here: Cy wrote Ana's Lisbon fact again.
+    const weighCards = async (token: string) => ((await r.view(token)).weigh as AnyView).cards as AnyView[];
+    const anaOwn = must((await weighCards(r.who.ana)).find((c) => c.mine));
+    const cyDup = must((await weighCards(r.who.cy)).find((c) => c.mine && /cheap flights/.test(c.neutral)));
+    await expect(call(mergeCards, { ...both(r.code, r.who.ben), keepId: anaOwn.id, absorbId: cyDup.id })).rejects.toMatchObject({ errorCode: "forbidden", statusCode: 403 }); // Ben holds neither
+    await expect(agent(r.code, r.who.ana, mergeCards, { keepId: anaOwn.id, absorbId: cyDup.id })).rejects.toMatchObject({ errorCode: "forbidden", statusCode: 403 }); // nor can Ana's agent absorb Cy's card
+    expect(await weighCards(r.who.ana)).toHaveLength(5); // nothing merged yet
+    await agent(r.code, r.who.cy, mergeCards, { keepId: anaOwn.id, absorbId: cyDup.id }); // Cy's agent, on Cy's request, folds Cy's own card in
+    const merged = await weighCards(r.who.ana);
+    expect(merged).toHaveLength(4);
+    expect(((await r.view(r.who.ana)).weigh as AnyView).total).toBe(4);
+    for (const [name, t, mine] of [["Ana", r.who.ana, 1], ["Ben", r.who.ben, 2], ["Cy", r.who.cy, 2]] as const) {
+      const cardsOfMember = await weighCards(t);
+      expect(cardsOfMember.filter((c) => c.mine), `${name}: cards flagged mine`).toHaveLength(mine); // Cy now holds the merged card as well as the Oslo one
+      expect(JSON.stringify(cardsOfMember)).not.toMatch(/Lisbon|Berlin|Oslo|"holders"|"option"|"by"|merged|absorbed/);
+    }
     await expect(call(markDone, { ...both(r.code, r.who.ana), done: true })).rejects.toMatchObject({ errorCode: "invalid", message: expect.stringContaining("Rate every card") });
     // every member rates every card, all at once: no rating may be lost
     await Promise.all(
-      Object.values(r.who).flatMap((t, i) => (weigh.weigh.cards as AnyView[]).map((c) => call(rateCard, { ...both(r.code, t), cardId: c.id, weight: i + 1 }, "frontend"))),
+      Object.values(r.who).flatMap((t, i) => merged.map((c) => call(rateCard, { ...both(r.code, t), cardId: c.id, weight: i + 1 }, "frontend"))),
     );
     for (const [i, t] of Object.values(r.who).entries()) {
       const w = (await r.view(t)).weigh as AnyView;
@@ -191,6 +209,7 @@ describe("get-room gives every caller the same sealed view", () => {
     // vote
     const vote = await checkPhase("vote");
     expect(vote.ledger).toHaveLength(4);
+    expect((vote.ledger as AnyView[]).map((c) => c.holderCount).sort()).toEqual([1, 1, 1, 2]); // the merged Lisbon fact is known by two
     for (const [t, o] of [[r.who.ana, "A"], [r.who.ben, "B"]] as const) await call(castVote, { ...both(r.code, t), optionId: o }, "http");
     await checkPhase("vote"); // two of three have voted: still sealed
     await call(castVote, { ...both(r.code, r.who.cy), optionId: "C" }, "frontend");

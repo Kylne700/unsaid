@@ -175,17 +175,31 @@ export function withdrawCard(room: Room, me: Member, cardId: string) {
   room.drafts.push({ id: newId("d"), ownerId: me.id, option: card.option, polarity: card.polarity, text: card.text, neutral: card.neutral, origin: "manual", phrase: null, factKey: card.factKey });
 }
 
-/** Two cards that state the same fact become one card whose holders are the union. */
+/**
+ * Two cards that state the same fact become one card whose holders are the union. You can only absorb a card you hold.
+ * Cards phase: both cards must be yours (a live room shows you nobody else's cards there). Weigh phase: the card you keep
+ * may be anyone's, which is the one way to join a duplicate of someone else's fact once the ledger is on the table; the
+ * cards carry no names there and nothing shows who merged. The weight members gave the absorbed card moves to the kept one.
+ * The checks run in this order so a refusal before weigh says nothing about a card's option or side.
+ */
 export function mergeCards(room: Room, me: Member, keepId: string, absorbId: string) {
-  needPhase(room, "cards");
+  needPhase(room, "cards", "weigh");
   if (keepId === absorbId) throw new RoomError("Pick two different cards.");
   const keep = cardById(room, keepId);
   const gone = cardById(room, absorbId);
-  if (!holdersOf(keep).includes(me.id) && !holdersOf(gone).includes(me.id)) throw new RoomError("You can only merge cards that one of you holds.", "forbidden");
+  if (!holdersOf(gone).includes(me.id)) throw new RoomError("You can only merge one of your own cards into another card.", "forbidden");
+  if (room.phase === "cards" && !holdersOf(keep).includes(me.id)) throw new RoomError("Before the weigh phase you can only merge your own cards.", "bad_phase");
   if (keep.option !== gone.option || keep.polarity !== gone.polarity) throw new RoomError("Cards about different options, or a pro and a con, are not the same fact.", "conflict");
   const part: Absorbed = { id: gone.id, text: gone.text, neutral: gone.neutral, ownHolders: gone.ownHolders, factKey: gone.factKey, by: me.id };
   keep.absorbed.push(part, ...gone.absorbed);
   room.cards.splice(room.cards.indexOf(gone), 1);
+  // Ratings exist from weigh on. Each member keeps their rating of the kept card; one who rated only the absorbed card gives that one to it.
+  for (const rated of Object.values(room.ratings)) {
+    const weight = rated[absorbId];
+    if (weight === undefined) continue;
+    rated[keepId] ??= weight;
+    delete rated[absorbId];
+  }
 }
 /** Undo a merge: the absorbed card comes back as its own card with its own holders. */
 export function unmergeCard(room: Room, me: Member, cardId: string, absorbedId: string) {

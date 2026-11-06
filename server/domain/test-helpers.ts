@@ -24,9 +24,13 @@ export const DRAFT = { ana: "ANA-DRAFT-SENTINEL Lisbon is hilly.", ben: "BEN-DRA
 
 /**
  * A live room with three members (Ana, Ben, Cy), brought to `upTo` with the creator's force-advance. Every card has one
- * holder: Ana 3, Ben 3, Cy 2. With `merge`, Cy's Berlin pro is merged into Ben's (7 cards, one with two holders and a merged part).
+ * holder: Ana 3, Ben 3, Cy 2. Merges (the two cards must be about the same option and side):
+ * - `merge`: as soon as weigh opens, Cy folds their Berlin pro into Ben's (7 cards, one with two holders and a merged part).
+ *   Members cannot see each other's cards before weigh, so this needs `upTo` weigh or later.
+ * - `ownMerge`: in the cards phase Ben folds a second Berlin pro of his own into his first (8 cards, one merged part, still one holder).
  */
-export function buildRoom(upTo: Phase, opts: { merge?: boolean } = {}) {
+export function buildRoom(upTo: Phase, opts: { merge?: boolean; ownMerge?: boolean } = {}) {
+  if (opts.merge && (upTo === "notes" || upTo === "cards")) throw new Error("merge needs the weigh phase or later");
   const made = createRoom({ code: "SEALT1", question: "Which city should we move to?", options: ["Lisbon", "Berlin", "Oslo"], creatorName: "Ana" });
   const room: Room = made.room;
   room.seed = "fixed-seed";
@@ -50,10 +54,15 @@ export function buildRoom(upTo: Phase, opts: { merge?: boolean } = {}) {
   give(ana, [["Lisbon has cheap flights.", "A", "pro"], ["Lisbon summers are very hot.", "A", "con"], ["Oslo has great transit.", "C", "pro"]], DRAFT.ana);
   give(ben, [["Berlin rents are rising.", "B", "con"], ["Berlin has a big tech scene.", "B", "pro"], ["Lisbon has a tiny office market.", "A", "con"]], DRAFT.ben);
   give(cy, [["Oslo is dark in winter.", "C", "con"], ["Berlin nightlife is lively.", "B", "pro"]], DRAFT.cy);
-  if (opts.merge) mergeCards(room, ben, must(room.cards.find((c) => c.text === "Berlin has a big tech scene.")).id, must(room.cards.find((c) => c.text === "Berlin nightlife is lively.")).id);
+  const idOf = (text: string) => must(room.cards.find((c) => c.text === text)).id;
+  if (opts.ownMerge) {
+    approveDraft(room, ben, saveDraft(room, ben, { text: "Berlin has many startups.", option: "B", polarity: "pro" }).id);
+    mergeCards(room, ben, idOf("Berlin has a big tech scene."), idOf("Berlin has many startups."));
+  }
   if (upTo === "cards") return t;
 
   forceAdvance(room, ana); // weigh
+  if (opts.merge) mergeCards(room, cy, idOf("Berlin has a big tech scene."), idOf("Berlin nightlife is lively."));
   const rating = new Map<string, 1 | 2 | 3>([[ana.id, 2], [ben.id, 3], [cy.id, 1]]);
   for (const m of t.all) for (const c of room.cards) rateCard(room, m, c.id, rating.get(m.id) ?? 0);
   if (upTo === "weigh") return t;

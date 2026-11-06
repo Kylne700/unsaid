@@ -6,7 +6,7 @@ import { useCallback, useState } from "react";
 import type { GuestView, RoomView } from "../../server/domain/view";
 
 export type RoomData = RoomView | GuestView;
-export type RunResult<T> = { ok: true; data: T } | { ok: false };
+export type RunResult<T> = { ok: true; data: T } | { ok: false; error: string };
 export type RunAction = <T = unknown>(name: string, args?: Record<string, unknown>) => Promise<RunResult<T>>;
 
 const POLL_MS = 2000;
@@ -41,8 +41,9 @@ export function useRoomActions(code: string, token: string, refresh: () => Promi
         await refresh();
         return { ok: true, data };
       } catch (e) {
-        setError(actionErrorMessage(e) ?? "That did not work. Try again.");
-        return { ok: false };
+        const message = actionErrorMessage(e) ?? "That did not work. Try again.";
+        setError(message);
+        return { ok: false, error: message };
       } finally {
         setPending((n) => n - 1);
       }

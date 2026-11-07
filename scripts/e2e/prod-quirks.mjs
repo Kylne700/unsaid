@@ -5,6 +5,7 @@
 //  B. The framework's cookie banner for EU visitors (chosen by time zone, or by the host's country header) must not show
 //     on any screen of a practice run, nothing may lie on top of an action button, and no request may leave for another host
 //     (the harness aborts every host but 127.0.0.1 and lists it in `blocked`).
+//  C. The connection drops while notes are being typed: the page must stay (no reload into the browser's offline page).
 // Run: node scripts/e2e/prod-quirks.mjs --base=http://127.0.0.1:<port> --pw-core=<path to playwright-core/index.mjs>
 import { assertClean, BASE, newPlayer } from "./harness.mjs";
 
@@ -125,6 +126,37 @@ for (const [label, opts] of [
   } finally {
     await p.close();
   }
+}
+
+// ---- C. the connection drops while someone is typing notes ----------------------------------------------------------------
+// The first failed call makes the framework load a script chunk; offline that load fails, and its head script used to reload the
+// page into the browser's offline page, with the unsaved notes gone. Ten rounds, because it did not happen every time.
+{
+  const ROUNDS = 10;
+  let blank = 0;
+  let lost = 0;
+  for (let i = 0; i < ROUNDS; i++) {
+    const c = await newPlayer("offline" + i);
+    try {
+      await c.page.goto(`${BASE}/`);
+      await c.page.getByTestId("try-trap").click();
+      await c.page.waitForURL(/\/r\/[A-Z0-9]{4,12}$/);
+      await phase(c.page, "notes");
+      const box = c.page.getByTestId("notes-input");
+      await box.fill("saved while online");
+      await c.page.getByTestId("notes-state").getByText("Saved", { exact: false }).waitFor();
+      await c.ctx.setOffline(true);
+      await box.fill("saved while online\ntyped after the connection dropped");
+      await c.page.waitForTimeout(2200);
+      if (!c.page.url().startsWith(BASE)) blank++;
+      else if ((await box.inputValue().catch(() => "")) !== "saved while online\ntyped after the connection dropped") lost++;
+    } catch (e) {
+      lost++;
+    } finally {
+      await c.close();
+    }
+  }
+  check(`offline while typing: the page stays and keeps the typed notes (${ROUNDS} rounds)`, blank === 0 && lost === 0, `${blank} browser offline pages, ${lost} lost texts`);
 }
 
 const failed = checks.filter((c) => !c.ok);

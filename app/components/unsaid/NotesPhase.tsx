@@ -23,16 +23,32 @@ export function NotesPhase() {
   const dirty = useRef(false);
   const role = room.members.find((m) => m.id === room.me.id)?.role ?? null;
 
-  const save = useCallback(async () => {
+  // True when everything typed so far is on the server, false when a save failed (the person is told why by the room's alert).
+  // One save runs at a time and repeats while more was typed meanwhile, so an older text can never land after a newer one.
+  const flight = useRef<Promise<boolean> | null>(null);
+  const save = useCallback((): Promise<boolean> => {
     clearTimeout(timer.current);
-    if (!dirty.current) return;
-    const value = latest.current;
-    setState("saving");
-    const r = await run("save-notes", { text: value });
-    if (r.ok && latest.current === value) {
-      dirty.current = false;
-      setState("saved");
-    } else setState("typing");
+    if (flight.current) return flight.current;
+    const p = (async () => {
+      try {
+        while (dirty.current) {
+          const value = latest.current;
+          setState("saving");
+          const r = await run("save-notes", { text: value });
+          if (!r.ok) {
+            setState("typing");
+            return false;
+          }
+          if (latest.current === value) dirty.current = false;
+        }
+        setState("saved");
+        return true;
+      } finally {
+        flight.current = null;
+      }
+    })();
+    flight.current = p;
+    return p;
   }, [run]);
 
   useEffect(() => {

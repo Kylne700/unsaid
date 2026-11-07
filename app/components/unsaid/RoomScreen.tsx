@@ -94,8 +94,8 @@ function useSeatCookie(code: string, token: string) {
 
 export function RoomScreen({ code, token, room, refresh }: { code: string; token: string; room: RoomView; refresh: () => Promise<unknown> }) {
   const { run, busy, error, clearError } = useRoomActions(code, token, refresh);
-  const beforeDone = useRef<(() => Promise<void>) | null>(null);
-  const ctx = useMemo(() => ({ room, run, busy, beforeDone }), [room, run, busy]);
+  const beforeDone = useRef<(() => Promise<boolean | void>) | null>(null);
+  const ctx = useMemo(() => ({ room, run, busy, error, beforeDone }), [room, run, busy, error]);
   useSeatCookie(code, token);
 
   return (

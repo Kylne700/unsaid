@@ -53,6 +53,11 @@ export const links: LinksFunction = () => [
 
 const THEME_INIT_SCRIPT = getThemeInitScript();
 const LOCALE_INIT_SCRIPT = getLocaleInitScript();
+// The framework's own head script reloads the page when a script chunk fails to load. While the connection is down that reload shows
+// the browser's offline page and drops notes that were typed but not yet saved. This listener has to be registered before the framework's
+// (listeners on window run in registration order), so it is the first script in <head>. A chunk that fails while online still reloads.
+const OFFLINE_RELOAD_GUARD =
+  'window.addEventListener("vite:preloadError",function(e){if(!navigator.onLine){e.preventDefault();e.stopImmediatePropagation()}},true);';
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -62,6 +67,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta
           name="viewport"
           content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, interactive-widget=resizes-content"
+        />
+        <script
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: OFFLINE_RELOAD_GUARD }}
         />
         <script
           suppressHydrationWarning

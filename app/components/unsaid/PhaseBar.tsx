@@ -16,8 +16,9 @@ const STEPS = [
 ] as const;
 
 export function PhaseBar() {
-  const { room, run, beforeDone } = useRoomCtx();
+  const { room, run, beforeDone, error } = useRoomCtx();
   const [confirming, setConfirming] = useState(false);
+  const [notSaved, setNotSaved] = useState(false);
   const at = STEPS.findIndex((s) => s.id === room.phase);
   const { me, phase } = room;
   const waitingFor = room.members.filter((m) => !m.done && m.id !== me.id);
@@ -70,8 +71,10 @@ export function PhaseBar() {
             <Button
               disabled={blocked !== null}
               onClick={async () => {
-                await beforeDone.current?.();
-                await run("mark-done", { done: true });
+                // Work that failed (unsaved notes) stops "done"; the room's alert says why and stays up because nothing else runs.
+                const saved = (await beforeDone.current?.()) !== false;
+                setNotSaved(!saved);
+                if (saved) await run("mark-done", { done: true });
               }}
             >
               I'm done
@@ -116,6 +119,11 @@ export function PhaseBar() {
         </div>
       </div>
       {blocked && canMarkDone && !me.done ? <p className="mt-2 text-sm text-muted-foreground">{blocked}</p> : null}
+      {notSaved && error && canMarkDone && !me.done ? (
+        <p className="mt-2 text-sm text-muted-foreground" data-testid="not-saved">
+          Your notes are not saved yet, so you are not marked done. Try I'm done again in a moment.
+        </p>
+      ) : null}
     </section>
   );
 }

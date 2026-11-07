@@ -14,6 +14,8 @@ const fmt = (x: number) => String(Math.round(x * 100) / 100);
 /** Scores always show two decimals ("5.00", "-2.33"), so the rows of the proof panel and the table read the same. */
 const fixed = (x: number) => (x.toFixed(2) === "-0.00" ? "0.00" : x.toFixed(2));
 const NUMBER_WORD = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight"];
+/** How many people, as the headline and the grid row say it: "both" for a pair, else "all three", "all four", ... */
+const allOf = (n: number) => (n === 2 ? "both" : `all ${NUMBER_WORD[n] ?? n}`);
 
 function placeOf(r: Ranking, optionId: string) {
   const i = r.groups.findIndex((g) => g.options.includes(optionId));
@@ -153,7 +155,7 @@ function ProofPanel({ rv }: { rv: RevealView }) {
       <h2 className="text-lg font-semibold leading-snug tracking-tight sm:text-3xl">
         {everyoneLeaned ? (
           <>
-            Alone, all {NUMBER_WORD[n] ?? n} leaned to <span data-testid="headline-lean">{nameOfOption(options, v.initialPick)}</span>. The full ledger{" "}
+            Alone, {allOf(n)} leaned to <span data-testid="headline-lean">{nameOfOption(options, v.initialPick)}</span>. The full ledger{" "}
           </>
         ) : (
           <>
@@ -195,7 +197,7 @@ function ProofPanel({ rv }: { rv: RevealView }) {
             {rv.uniqueCount > 0 && sharedCards.length > 0 ? (
               <ProofRow
                 id="shared"
-                label={`Only what ${everyoneKnew ? `all ${NUMBER_WORD[n] ?? n}` : "at least two"} knew`}
+                label={`Only what ${everyoneKnew ? allOf(n) : "at least two"} knew`}
                 note={`(${sharedCards.length} of ${rv.cards.length} facts)`}
                 cells={cells((o) => <Num text={fixed(o.sharedScore)} id={`proof-shared-${o.id}`} />, grid.sharedOn)}
               />

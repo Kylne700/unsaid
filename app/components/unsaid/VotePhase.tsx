@@ -18,7 +18,11 @@ export function VotePhase() {
   const ledger = room.ledger ?? [];
   const sealed = room.me.hasVoted;
   const others = room.members.filter((m) => m.id !== room.me.id);
-  const canGuess = ledger.some((c) => c.guessable);
+  // The two optional guesses are for live rooms. A practice room (and its replay) asks only for ratings and one vote.
+  const optional = room.practice === null;
+  const guessables = optional ? ledger.filter((c) => c.guessable) : [];
+  const canGuess = guessables.length > 0;
+  const canExpect = optional && !sealed && others.length > 0;
 
   async function seal() {
     if (!choice) return;
@@ -41,17 +45,11 @@ export function VotePhase() {
       });
   }
 
-  // The facts come first: guesses lock when the last vote is in, and in a practice room that is your own vote.
+  // The facts come first. Guesses lock when the last vote is in.
   return (
     <div className="space-y-10">
       <section aria-labelledby="facts-title">
-        <SectionTitle
-          hint={
-            canGuess
-              ? "The ledger as the team approved it, with how many people knew each fact and how much you said it matters. Names come with the reveal. Where one other person knew a fact, you may guess who. Guesses are private, and you can change them until the last vote is in."
-              : "The ledger as the team approved it, with how many people knew each fact and how much you said it matters. Names come with the reveal."
-          }
-        >
+        <SectionTitle hint="The ledger as the team approved it, with how many people knew each fact and how much you said it matters. Names come with the reveal.">
           <span id="facts-title">The facts on the table</span>
         </SectionTitle>
         <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${room.options.length}, minmax(0, 1fr))` }}>
@@ -75,28 +73,6 @@ export function VotePhase() {
                         </span>
                         <span className="ml-auto">You rated it {c.myRating ?? "-"}</span>
                       </p>
-                      {c.guessable ? (
-                        <div className="mt-2 flex items-center gap-2 border-t pt-2">
-                          <label htmlFor={`guess-${c.id}`} className="shrink-0 text-xs text-muted-foreground">
-                            Who knew it?
-                          </label>
-                          <select
-                            id={`guess-${c.id}`}
-                            data-testid="guess-select"
-                            className={cn(selectClass, "h-8 min-w-0 flex-1 text-xs")}
-                            value={guess[c.id] ?? c.myGuess ?? ""}
-                            onChange={(e) => void guessWho(c.id, e.target.value)}
-                          >
-                            <option value="">Not sure</option>
-                            {others.map((m) => (
-                              <option key={m.id} value={m.id}>
-                                {m.name}
-                                {m.simulated ? " (simulated)" : ""}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      ) : null}
                     </li>
                   ))}
               </ul>
@@ -131,21 +107,62 @@ export function VotePhase() {
             );
           })}
         </div>
-        {!sealed && others.length > 0 ? (
-          <div className="mt-4 max-w-xl">
-            <label htmlFor="expect-same" className="block text-sm font-medium">
-              How many of the other {others.length} will pick the same option as you?
-            </label>
-            <select id="expect-same" data-testid="expect-same" className={cn(selectClass, "mt-1.5")} value={expect} onChange={(e) => setExpect(e.target.value)}>
-              <option value="">No guess</option>
-              {Array.from({ length: others.length + 1 }, (_, i) => (
-                <option key={i} value={String(i)}>
-                  {i}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-muted-foreground">Optional. Only you see your guess, at the reveal.</p>
-          </div>
+        {canGuess || canExpect ? (
+          <details className="mt-4 max-w-2xl rounded-lg border bg-card px-4 py-3 text-sm" data-testid="optional-guesses">
+            <summary className="cursor-pointer font-medium" data-testid="optional-guesses-summary">
+              {canGuess && canExpect ? "Optional: two quick guesses" : "Optional: a quick guess"}
+            </summary>
+            <div className="mt-4 space-y-6">
+              {canGuess ? (
+                <div>
+                  <p className="font-medium">Who knew it?</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Where only one other person knew a fact, you may guess who. Guesses are private, and you can change them until the last vote is in.
+                  </p>
+                  <ul className="mt-3 space-y-3">
+                    {guessables.map((c) => (
+                      <li key={c.id} className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3" data-testid="guess-row">
+                        <label htmlFor={`guess-${c.id}`} className="min-w-0 flex-1 leading-snug">
+                          <OptionTag options={room.options} id={c.option} /> {c.text}
+                        </label>
+                        <select
+                          id={`guess-${c.id}`}
+                          data-testid="guess-select"
+                          className={cn(selectClass, "h-8 w-full text-xs sm:w-44")}
+                          value={guess[c.id] ?? c.myGuess ?? ""}
+                          onChange={(e) => void guessWho(c.id, e.target.value)}
+                        >
+                          <option value="">Not sure</option>
+                          {others.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.name}
+                              {m.simulated ? " (simulated)" : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {canExpect ? (
+                <div className="max-w-xl">
+                  <label htmlFor="expect-same" className="block font-medium">
+                    How many of the other {others.length} will pick the same option as you?
+                  </label>
+                  <select id="expect-same" data-testid="expect-same" className={cn(selectClass, "mt-1.5")} value={expect} onChange={(e) => setExpect(e.target.value)}>
+                    <option value="">No guess</option>
+                    {Array.from({ length: others.length + 1 }, (_, i) => (
+                      <option key={i} value={String(i)}>
+                        {i}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-muted-foreground">Only you see your guess, at the reveal.</p>
+                </div>
+              ) : null}
+            </div>
+          </details>
         ) : null}
         <div className="mt-4 flex flex-wrap items-center gap-3">
           {sealed ? (

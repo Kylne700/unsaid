@@ -28,7 +28,7 @@ export function PhaseBar() {
   if (phase === "weigh" && room.weigh && room.weigh.rated < room.weigh.total) blocked = `Rate every card first (${room.weigh.total - room.weigh.rated} left).`;
 
   return (
-    <section aria-label="Room progress" className="rounded-lg border bg-card p-4" data-testid="phase-bar" data-phase={phase}>
+    <section aria-label="Room progress" className={cn("rounded-lg border bg-card p-4", room.practice?.replay && "sr-only")} data-testid="phase-bar" data-phase={phase}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <ol className="flex items-center gap-1.5 text-sm">
           {STEPS.map((s, i) => (

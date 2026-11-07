@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { FRIENDLY } from "../../app/lib/friendly-error";
 import { splitNotes } from "./extract-cards";
 import { holdersOf, uniqueCount } from "./ledger";
 import { addExtractedDrafts, approveDraft, castVote, createRoom, forceAdvance, joinRoom, memberByToken, mergeCards, rateCard, saveDraft, saveNotes, setDone, setInitialPick, unmergeCard, withdrawCard } from "./room";
@@ -148,6 +149,7 @@ describe("cards, merge and the unique count", () => {
     expect(uniqueCount(t.room.cards)).toBe(4);
 
     throwsKind(() => mergeCards(t.room, t.ana, x.id, hot.id), "conflict"); // same option, but a con is not a pro
+    expect(() => mergeCards(t.room, t.ana, x.id, hot.id)).toThrow(FRIENDLY.mergeRefused); // the page shows this exact sentence (app/lib/friendly-error.ts)
     throwsKind(() => mergeCards(t.room, t.ana, x.id, x.id), "invalid");
     mergeCards(t.room, t.ana, x.id, y.id);
     expect(t.room.cards).toHaveLength(3);

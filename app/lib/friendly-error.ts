@@ -12,6 +12,9 @@ export const FRIENDLY = {
   forbidden: "You cannot do that in this room.",
   moved: "The room has moved on to the next step. Try again once the page has updated.",
   conflict: "The room changed at the same moment. Try again.",
+  // The one refusal a person cannot foresee in the blind round (cards show no option), so the panel must say why. Chosen by comparing the
+  // server's text with this exact sentence; the sentence shown is always ours (server/domain/room.test.ts keeps the two in step).
+  mergeRefused: "Cards about different options, or a pro and a con, are not the same fact.",
   nameTaken: "Someone in this room already uses that name, or the room is full. Try another name.",
   closed: "This room has moved past the notes phase, so new people can no longer join.",
   invalid: "That did not look right. Check it and try again.",
@@ -30,7 +33,7 @@ export function isRetryable(error: unknown): boolean {
  * a 400 with any other code is the framework's own validation failure.
  */
 export function friendlyError(error: unknown, about: ErrorAbout = "action"): string {
-  const e = error as { status?: unknown; errorCode?: unknown; message?: unknown } | null | undefined;
+  const e = error as { status?: unknown; errorCode?: unknown; message?: unknown; actionMessage?: unknown } | null | undefined;
   const status = typeof e?.status === "number" ? e.status : undefined;
   const code = typeof e?.errorCode === "string" ? e.errorCode : undefined;
   if (status === undefined) return typeof e?.message === "string" && /^Action .+ failed: /.test(e.message) ? FRIENDLY.offline : FRIENDLY.other;
@@ -43,7 +46,7 @@ export function friendlyError(error: unknown, about: ErrorAbout = "action"): str
   if (code === "not_found") return FRIENDLY.notFound;
   if (code === "forbidden") return FRIENDLY.forbidden;
   if (code === "bad_phase") return FRIENDLY.moved;
-  if (code === "conflict") return FRIENDLY.conflict;
+  if (code === "conflict") return e?.actionMessage === FRIENDLY.mergeRefused ? FRIENDLY.mergeRefused : FRIENDLY.conflict;
   if (status === 400) return FRIENDLY.invalid;
   return FRIENDLY.other;
 }

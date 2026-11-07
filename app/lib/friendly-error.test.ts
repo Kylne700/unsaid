@@ -52,6 +52,8 @@ describe("friendlyError", () => {
     expect(friendlyError(failed(409, "bad_phase", ""))).toBe(FRIENDLY.moved);
     expect(friendlyError(failed(403, "forbidden", ""))).toBe(FRIENDLY.forbidden);
     expect(friendlyError(failed(409, "conflict", ""))).toBe(FRIENDLY.conflict);
+    expect(friendlyError(failed(409, "conflict", FRIENDLY.mergeRefused))).toBe(FRIENDLY.mergeRefused);
+    expect(friendlyError(failed(409, "conflict", `${FRIENDLY.mergeRefused} ${TYPED}`))).toBe(FRIENDLY.conflict);
     expect(friendlyError(new TypeError("x is not a function"))).toBe(FRIENDLY.other);
   });
 

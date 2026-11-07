@@ -9,7 +9,7 @@ import { useCommandMenuShortcut } from "@agent-native/toolkit/app/shared";
 import { CommandMenu } from "@agent-native/toolkit/app/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Links,
   Meta,
@@ -60,8 +60,20 @@ const LOCALE_INIT_SCRIPT = getLocaleInitScript();
 const OFFLINE_RELOAD_GUARD =
   'window.addEventListener("vite:preloadError",function(e){if(!navigator.onLine){e.preventDefault();e.stopImmediatePropagation()}},true);' +
   'window.addEventListener("error",function(e){var t=e.target;if(!navigator.onLine&&t&&t.tagName==="LINK"&&/(^|\\s)modulepreload(\\s|$)/i.test(t.rel))e.stopImmediatePropagation()},true);';
+// The buttons arrive before React attaches its handlers (about 1 s on a fast link, longer on a phone), so an early click used to vanish.
+// This holds the first one and stops the rest (no double rooms); Layout's effect sends "unsaid:hydrated" and the held button is pressed once.
+// Nothing in the page changes meanwhile (a changed DOM would bring back #418).
+const EARLY_CLICK_HOLD =
+  "(function(){var held;" +
+  'function hold(e){var b=e.target.closest&&e.target.closest("button");if(b){e.preventDefault();e.stopImmediatePropagation();held=held||b}}' +
+  'window.addEventListener("click",hold,true);' +
+  'window.addEventListener("unsaid:hydrated",function(){window.removeEventListener("click",hold,true);if(held&&held.isConnected&&!held.disabled)held.click()},{once:true})})();';
 
 export function Layout({ children }: { children: React.ReactNode }) {
+  // Layout wraps the page, the error page and the fallback alike, and its effect runs after the whole tree has committed.
+  useEffect(() => {
+    window.dispatchEvent(new Event("unsaid:hydrated"));
+  }, []);
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -72,7 +84,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         />
         <script
           suppressHydrationWarning
-          dangerouslySetInnerHTML={{ __html: OFFLINE_RELOAD_GUARD }}
+          dangerouslySetInnerHTML={{ __html: OFFLINE_RELOAD_GUARD + EARLY_CLICK_HOLD }}
         />
         <script
           suppressHydrationWarning

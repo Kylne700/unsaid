@@ -6,6 +6,8 @@
 //     on any screen of a practice run, nothing may lie on top of an action button, and no request may leave for another host
 //     (the harness aborts every host but 127.0.0.1 and lists it in `blocked`).
 //  C. The connection drops while notes are being typed: the page must stay (no reload into the browser's offline page).
+//  D. A click before the page's scripts have arrived (the buttons are on screen about 1 s before React answers, longer on a phone):
+//     it must count exactly once, not vanish and not start two rooms.
 // Run: node scripts/e2e/prod-quirks.mjs --base=http://127.0.0.1:<port> --pw-core=<path to playwright-core/index.mjs>
 import { assertClean, BASE, newPlayer } from "./harness.mjs";
 
@@ -166,6 +168,49 @@ await offlineWhileTyping("offline while typing on a real host name: the page sta
   allowHost: ALIAS,
   args: [`--host-resolver-rules=MAP ${ALIAS} 127.0.0.1`, `--unsafely-treat-insecure-origin-as-secure=${aliasOrigin}`],
 });
+
+// ---- D. clicks before the scripts have arrived ---------------------------------------------------------------------------------
+// Every script file is held back until the clicks are made, so they come first for certain (DOMContentLoaded does not wait for them).
+// "Before React" is proved, not assumed: React puts its props on a node when it hydrates it, and the button has none yet.
+const CREATE = /\/_agent-native\/actions\/create-(replay-room|practice-room|room)$/;
+const hydrated = (loc) => loc.evaluate((el) => Object.keys(el).some((k) => k.startsWith("__reactProps")));
+const opensReplay = (page) => page.waitForSelector('[data-testid="proof-panel"]', { timeout: 20000 });
+const opensPractice = async (page) => {
+  await page.waitForURL(/\/r\/[A-Z0-9]{4,12}$/, { timeout: 20000 });
+  await phase(page, "notes");
+};
+
+async function clickScenario(title, { testid, early, clicks, opens }) {
+  const p = await newPlayer("click");
+  const created = [];
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const cap = setTimeout(release, 25000); // a failing run must not hold the scripts forever
+  try {
+    p.page.on("request", (r) => CREATE.test(new URL(r.url()).pathname) && created.push(new URL(r.url()).pathname.split("/").pop()));
+    if (early) await p.page.route(/\.js(\?|$)/, async (route) => (await gate, route.fallback().catch(() => {})));
+    await p.page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+    const button = p.page.getByTestId(testid);
+    if (!early) await p.page.waitForFunction((id) => Object.keys(document.querySelector(`[data-testid="${id}"]`) ?? {}).some((k) => k.startsWith("__reactProps")), testid, { timeout: 20000 });
+    for (let i = 0; i < clicks; i++) await button.click();
+    const before = early ? !(await hydrated(button)) : true; // early: the click came before React had touched the button
+    release();
+    await opens(p.page);
+    await p.page.waitForTimeout(2000); // a late second request would show up here
+    const errors = p.problems.filter((x) => x.includes("pageerror"));
+    check(title, before && created.length === 1 && errors.length === 0, `${early ? `${clicks} click(s) before React: ${before}; ` : ""}create requests ${created.length} (${created.join(", ") || "none"}); page errors ${errors.length}`);
+  } catch (e) {
+    check(title, false, `${e.message.split("\n")[0]}; create requests ${created.length}`);
+  } finally {
+    clearTimeout(cap);
+    release();
+    await p.close();
+  }
+}
+await clickScenario("early click on See the trap: the replay opens (proof-panel within 20 s), 1 request, 0 page errors", { testid: "see-trap", early: true, clicks: 1, opens: opensReplay });
+await clickScenario("early click on Do it yourself: the practice room opens, 1 request, 0 page errors", { testid: "try-trap", early: true, clicks: 1, opens: opensPractice });
+await clickScenario("two early clicks on See the trap: exactly 1 request, 0 page errors", { testid: "see-trap", early: true, clicks: 2, opens: opensReplay });
+await clickScenario("a normal click once the page is ready: exactly 1 room, 0 page errors", { testid: "try-trap", early: false, clicks: 1, opens: opensPractice });
 
 const failed = checks.filter((c) => !c.ok);
 console.log(`\n${checks.length - failed.length}/${checks.length} checks passed`);

@@ -194,6 +194,11 @@ try {
   // ---- reveal --------------------------------------------------------------------------------
   await phase("reveal");
   await page.getByTestId("reveal").waitFor();
+  // Nothing can change after the reveal, so the room is not read any more (the last read is the one that brought the reveal).
+  await page.waitForTimeout(1000);
+  const revealFrom = Date.now();
+  await page.waitForTimeout(6000);
+  check("reveal: the room is not read any more (not one read in 6 s)", readsSince(revealFrom) === 0, `${readsSince(revealFrom)} reads`);
   const lean = await page.getByTestId("headline-lean").innerText();
   const full = await page.getByTestId("headline-full").innerText();
   check("reveal: headline compares the sealed lean with the full ledger", lean === "Brightpane Chat" && full === "Kelvane Desk", `lean=${lean}; full ledger points to=${full}`);
@@ -312,6 +317,64 @@ try {
 } finally {
   await p.close();
 }
+// ---- the reading schedule: 2 s at first, 5 s after a quiet minute, 15 s after 5, stopped with a notice after 15 -----------------
+// Its own player whose page clock is moved forward (window.__skew is added to Date.now), so quiet minutes take seconds.
+{
+  const s = await newPlayer("schedule", { width: 1280, height: 800 });
+  try {
+    await s.ctx.addInitScript(() => {
+      const real = Date.now.bind(Date);
+      window.__skew = 0;
+      Date.now = () => real() + window.__skew;
+    });
+    const reads = [];
+    s.page.on("request", (r) => {
+      if (new URL(r.url()).pathname.endsWith("/get-room")) reads.push(Date.now());
+    });
+    const since = (t) => reads.filter((x) => x >= t).length;
+    const window_ = async (ms) => {
+      const t = Date.now();
+      await s.page.waitForTimeout(ms);
+      return since(t);
+    };
+    const skew = (ms) => s.page.evaluate((m) => (window.__skew = m), ms);
+    const notice = s.page.getByTestId("updates-paused");
+    await s.page.goto(`${BASE}/`);
+    await s.page.getByTestId("try-trap").click();
+    await s.page.waitForURL(/\/r\/[A-Z0-9]{4,12}$/);
+    await s.page.waitForSelector('[data-testid="phase-bar"][data-phase="notes"]', { timeout: 15000 });
+    // The page hydrates after the first paint and focuses its first field then: that focus is itself a sign of life, so let the page read twice first.
+    for (let i = 0; i < 50 && reads.length < 2; i++) await s.page.waitForTimeout(200);
+
+    await skew(61_000);
+    await s.page.waitForTimeout(2600); // the next read plans the slower pace
+    let n = await window_(15_000);
+    check("schedule: after a quiet minute the room is read about every 5 s (15 s window: 2 to 4 reads)", n >= 2 && n <= 4, `${n} reads`);
+    await skew(61_000 + 5 * 60_000);
+    await s.page.waitForTimeout(5200);
+    n = await window_(20_000);
+    check("schedule: after 5 quiet minutes about every 15 s (20 s window: 1 or 2 reads)", n >= 1 && n <= 2, `${n} reads`);
+    await skew(61_000 + 5 * 60_000 + 15 * 60_000);
+    await notice.waitFor({ timeout: 20_000 }).catch(() => {});
+    check("schedule: after 15 quiet minutes the page says 'Updates paused.' and offers Resume", (await notice.count()) === 1 && /Updates paused\./.test(await notice.innerText()) && (await notice.getByRole("button", { name: "Resume" }).count()) === 1);
+    await s.page.waitForTimeout(1000);
+    n = await window_(12_000);
+    check("schedule: while paused, not one read in 12 s", n === 0, `${n} reads`);
+    const t = Date.now();
+    await notice.getByRole("button", { name: "Resume" }).click();
+    await s.page.waitForTimeout(500);
+    check("schedule: Resume reads the room at once and the notice goes", since(t) >= 1 && (await notice.count()) === 0, `${since(t)} reads in 500 ms`);
+    n = await window_(6000);
+    check("schedule: after Resume the room is read about every 2 s again (6 s window: 2 to 4 reads)", n >= 2 && n <= 4, `${n} reads`);
+    assertClean(s);
+    check("schedule: no sign-in, no 401/403 beyond the known probe, no page errors", true);
+  } catch (e) {
+    check("schedule: run", false, e.message);
+  } finally {
+    await s.close();
+  }
+}
+
 const failed = checks.filter((c) => !c.ok);
 console.log(`\n${checks.length - failed.length}/${checks.length} checks passed`);
 process.exit(failed.length ? 1 : 0);

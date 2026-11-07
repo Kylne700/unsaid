@@ -123,7 +123,7 @@ function useSeatCookie(code: string, token: string) {
   }, [code, token]);
 }
 
-export function RoomScreen({ code, token, room, refresh }: { code: string; token: string; room: RoomView; refresh: () => Promise<unknown> }) {
+export function RoomScreen({ code, token, room, refresh, paused }: { code: string; token: string; room: RoomView; refresh: () => Promise<unknown>; paused: boolean }) {
   const { run, busy, error, clearError } = useRoomActions(code, token, refresh);
   const beforeDone = useRef<(() => Promise<boolean | void>) | null>(null);
   const ctx = useMemo(() => ({ room, run, busy, error, beforeDone }), [room, run, busy, error]);
@@ -171,6 +171,16 @@ export function RoomScreen({ code, token, room, refresh }: { code: string; token
         </header>
 
         <PhaseBar />
+
+        {paused ? (
+          // Reading the room stopped after a long quiet time; any click or key press starts it again, and so does this button.
+          <div role="status" className="mt-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-md bg-muted px-3 py-2 text-sm text-foreground" data-testid="updates-paused">
+            <span>Updates paused.</span>
+            <Button type="button" variant="outline" size="sm" onClick={() => void refresh()}>
+              Resume
+            </Button>
+          </div>
+        ) : null}
 
         {error ? (
           <div role="alert" className={`mt-4 flex items-start justify-between gap-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm ${errorText}`}>

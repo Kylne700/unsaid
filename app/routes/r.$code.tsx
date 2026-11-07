@@ -19,7 +19,7 @@ export default function RoomRoute() {
   const params = useParams();
   const code = normalizeCodeInput(params.code ?? "");
   const seat = useRoomToken(code);
-  const q = useRoomQuery(code, seat.token, seat.ready);
+  const { q, refresh, paused } = useRoomQuery(code, seat.token, seat.ready);
   const data = q.data;
   // A room that never opened keeps its last error on screen while the automatic retries run: each retry flips the query back to
   // "pending" and would otherwise blink the error away and show the skeleton again.
@@ -79,5 +79,5 @@ export default function RoomRoute() {
   }
   if (data.guest) return <JoinGate view={data} onJoined={seat.set} />;
   // A member view only ever comes back for a valid token, so the token is set here.
-  return seat.token ? <RoomScreen code={code} token={seat.token} room={data} refresh={q.refetch} /> : null;
+  return seat.token ? <RoomScreen code={code} token={seat.token} room={data} refresh={refresh} paused={paused} /> : null;
 }

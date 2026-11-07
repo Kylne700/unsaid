@@ -87,7 +87,7 @@ let code = "";
 try {
   // ---- Ana starts a room ---------------------------------------------------------------------
   await A.goto(`${BASE}/`);
-  await A.getByRole("button", { name: "Try the trap (3 min)" }).waitFor();
+  await A.getByTestId("try-trap").waitFor();
   await A.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
   await A.getByLabel("The decision").fill("Which laptop should the design team buy?");
   await A.getByLabel("Option 1").fill("Zeta");
@@ -369,9 +369,15 @@ try {
   const SCREEN = "Omega's screen is far brighter.";
   const EUROS = "Omega costs 400 euros more than Zeta.";
   const MATTE = "Zeta has a matte screen option.";
-  const guessBox = (page, text) => page.getByTestId("vote-card").filter({ has: page.getByText(text, { exact: true }) }).getByTestId("guess-select");
-  const guessable = (page) => page.evaluate(() => [...document.querySelectorAll('[data-testid="vote-card"]')].filter((el) => el.querySelector('[data-testid="guess-select"]')).map((el) => el.querySelector("p").textContent).sort());
+  const guessBox = (page, text) => page.getByTestId("guess-row").filter({ hasText: text }).getByTestId("guess-select");
+  // The fact is the last text node of the row's label (an option tag comes first).
+  const guessable = (page) => page.evaluate(() => [...document.querySelectorAll('[data-testid="guess-row"] label')].map((l) => l.lastChild.textContent.trim()).sort());
   const sameList = (x, y) => JSON.stringify(x) === JSON.stringify([...y].sort());
+  // The two questions are optional: they sit in one closed box under the vote, and opening it is the only extra step.
+  const boxes = await Promise.all([A, B, C].map(async (pg) => ({ open: await pg.getByTestId("optional-guesses").evaluate((el) => el.open), label: (await pg.getByTestId("optional-guesses-summary").innerText()).trim() })));
+  check("vote: the two guesses sit in one closed box named 'Optional: two quick guesses'", boxes.every((b) => !b.open && b.label === "Optional: two quick guesses"), JSON.stringify(boxes));
+  await snapBoth(C, "15-live-cleo-vote-first");
+  for (const pg of [A, B, C]) await pg.getByTestId("optional-guesses-summary").click();
   check(
     "vote: each person can guess exactly the facts that one other person knew (not the merged fact, not their own)",
     sameList(await guessable(A), [EUROS, MATTE]) && sameList(await guessable(B), [SCREEN, MATTE]) && sameList(await guessable(C), [SCREEN, EUROS]),
@@ -404,7 +410,7 @@ try {
   check("vote: Cleo changes a guess and the last one counts", await stored(C, { [SCREEN]: "m2", [EUROS]: "m1" }));
   const s3 = await snap();
   check("vote: Cleo's guesses change nothing in Ana's or Ben's data (byte for byte)", s3.a === s2.a && s3.b === s2.b && s3.c !== s2.c);
-  const guessAt = async (page) => page.evaluate(() => Object.fromEntries([...document.querySelectorAll('[data-testid="vote-card"]')].filter((el) => el.querySelector('[data-testid="guess-select"]')).map((el) => [el.querySelector("p").textContent, el.querySelector('[data-testid="guess-select"]').selectedOptions[0].textContent])));
+  const guessAt = async (page) => page.evaluate(() => Object.fromEntries([...document.querySelectorAll('[data-testid="guess-row"]')].map((el) => [el.querySelector("label").lastChild.textContent.trim(), el.querySelector('[data-testid="guess-select"]').selectedOptions[0].textContent])));
   check(
     "vote: each window shows only its own person's guesses",
     sameGuesses(await guessAt(A), { [EUROS]: "Ben", [MATTE]: "Ben" }) && sameGuesses(await guessAt(B), { [SCREEN]: "Ana", [MATTE]: "Ana" }) && sameGuesses(await guessAt(C), { [SCREEN]: "Ben", [EUROS]: "Ana" }),
@@ -467,6 +473,14 @@ try {
   const meter = { scope: "room", result: { guessers: 3, guesses: 6, right: 3, rightPct: 50, chancePct: 50, verdict: "near" } };
   check("reveal: ONE room-wide guess-who number, the same in all three views", views.every((v) => canon(v.reveal.guessWho) === canon(meter)), canon(views[0].reveal.guessWho));
   const norm = (t) => t.replace(/\s+/g, " ").trim();
+  // They sit in one closed "More detail" under the proof panel; Cleo gave no alone guess, so hers names one panel less.
+  const mores = await Promise.all([A, B, C].map(async (pg) => ({ open: await pg.getByTestId("more-detail").evaluate((el) => el.open), label: norm(await pg.getByTestId("more-detail-summary").innerText()) })));
+  check(
+    "reveal: 'More detail' is closed and names what is inside (alone check for Ana and Ben, guess who for all, every card)",
+    mores.every((m) => !m.open) && /^More detail \(alone check, guess who, all \d+ cards\)$/.test(mores[0].label) && mores[1].label === mores[0].label && /^More detail \(guess who, all \d+ cards\)$/.test(mores[2].label),
+    mores.map((m) => m.label).join(" | "),
+  );
+  for (const pg of [A, B, C]) await pg.getByTestId("more-detail-summary").click();
   const shown = [];
   for (const pg of [A, B, C]) shown.push([norm(await pg.getByTestId("guess-pct").innerText()), norm(await pg.getByTestId("guess-detail").innerText()), norm(await pg.getByTestId("guess-meaning").innerText())]);
   check(

@@ -1,7 +1,9 @@
 // Practice run end to end in a fresh headless Chromium (own temp profile, 127.0.0.1 only):
-// home -> "Try the trap" -> notes + sealed lean -> cards -> blind weigh -> vote (guess who, alone check) -> reveal.
+// home -> "Do it yourself (3 min)" -> notes + sealed lean -> cards -> blind weigh -> vote (ratings and one vote, no guess questions) -> reveal;
+// then the 20-second replay ("See the trap in 20 seconds"): its numbers are locked and it must cost zero model calls.
 // Run: node scripts/e2e/practice.mjs --pw-core=<path to playwright-core/index.mjs>   (dev server on http://127.0.0.1:18744, or --base=...)
-import { mkdirSync } from "node:fs";
+// The zero-model-calls check reads the audit stub's log: pass STUB_LOG=<that file> (the server under test must run with the stub); without it that one check is skipped.
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,6 +20,14 @@ const check = (name, ok, detail = "") => {
   console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? ` -- ${detail}` : ""}`);
 };
 
+// Model calls the server under test has made so far (one ` GEMINI ` line each in the stub's log); null when no log was given.
+const modelCalls = () => {
+  const file = process.env.STUB_LOG;
+  if (!file) return null;
+  return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter((l) => l.includes(" GEMINI ")).length : 0;
+};
+const norm = (t) => t.replace(/\s+/g, " ").trim();
+
 const p = await newPlayer("practice", { width: 1280, height: 800 });
 const { page } = p;
 const shot = async (name, full = false) => {
@@ -29,19 +39,33 @@ const phase = (name) => page.waitForSelector(`[data-testid="phase-bar"][data-pha
 
 try {
   await page.goto(`${BASE}/`);
-  await page.getByRole("button", { name: "Try the trap (3 min)" }).waitFor();
+  await page.getByTestId("try-trap").waitFor();
   // The dev server may reload once while it optimizes dependencies; let the page settle before clicking.
   await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+
+  // ---- home: the result first, ONE filled button --------------------------------------------------
+  const proofResult = norm(await page.getByTestId("proof-result").innerText());
+  check("home: the proof strip states the result, with the numbers of the scripted team", /Alone, each of three teammates leans to Brightpane Chat\. With all 15 facts on the table, the ledger points to Kelvane Desk\./.test(proofResult), proofResult);
+  check("home: the two start buttons say what they do", norm(await page.getByTestId("see-trap").innerText()) === "See the trap in 20 seconds" && norm(await page.getByTestId("try-trap").innerText()) === "Do it yourself (3 min)");
+  const fill = (loc) => loc.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const [fillSee, fillTry, fillStart, fillJoin] = [await fill(page.getByTestId("see-trap")), await fill(page.getByTestId("try-trap")), await fill(page.getByTestId("start-room")), await fill(page.getByRole("button", { name: "Join", exact: true }))];
+  check("home: exactly one filled button (See the trap); the other three are outlines", fillSee !== "rgba(0, 0, 0, 0)" && new Set([fillTry, fillStart, fillJoin]).size === 1 && fillSee !== fillTry, `see=${fillSee}; others=${[fillTry, fillStart, fillJoin].join(" | ")}`);
+  const links = await page.locator('[data-testid="proof-study"] a, [data-testid="proof-structure"] a').evaluateAll((as) => as.map((a) => a.getAttribute("href")));
+  check("home: the two sources are links and the limit is stated", links.join() === "https://doi.org/10.1037/0022-3514.48.6.1467,https://arxiv.org/abs/2508.08242" && (await page.getByText("We have not tested whether it helps real teams.").count()) === 1, links.join(" "));
   await shot("01-home.png", true);
 
   // ---- notes ---------------------------------------------------------------------------------
-  await page.getByRole("button", { name: "Try the trap (3 min)" }).click();
+  await page.getByTestId("try-trap").click();
   await page.waitForURL(/\/r\/[A-Z0-9]{4,12}$/);
   await phase("notes");
   const code = page.url().split("/r/")[1];
   const memo = await page.getByTestId("notes-input").inputValue();
   check("notes: the memo is prefilled", memo.length > 100, `${memo.length} chars`);
-  check("practice banner and simulated labels", (await page.getByTestId("practice-banner").count()) === 1 && (await page.getByText("simulated").count()) >= 2);
+  const banner = page.getByTestId("practice-banner");
+  check("practice banner is one closed line with the reason one click away; teammates are labelled simulated", (await banner.count()) === 1 && (await banner.evaluate((el) => el.tagName === "DETAILS" && !el.open)) && /Why simulated\?/.test(await banner.innerText()) && (await page.getByText("simulated").count()) >= 2);
+  await banner.locator("summary").click();
+  check("practice banner: one click shows that their notes, ratings and votes are scripted", /Their notes, ratings and votes are scripted/.test(await banner.innerText()));
+  await banner.locator("summary").click();
   const barText = await page.getByTestId("phase-bar").innerText();
   check("phase bar: the player is shown as 'You', not 'You (you)'", /\bYou\b/.test(barText) && !/You \(you\)/.test(barText));
 
@@ -159,29 +183,10 @@ try {
   // ---- vote ----------------------------------------------------------------------------------
   const voteText = await page.locator("main").innerText();
   check("vote: no scores or totals before the reveal", !/Full ledger|own facts only|points to/i.test(voteText));
-  // Guess who knew each fact that exactly one teammate knew. The scenario file is the ground truth for who that was:
-  // right, wrong, right, not sure, right, wrong -> 5 guesses, 3 right.
-  const holderOf = new Map(scenario.facts.map((f) => [f.text, f.holders]));
-  const nameOf = { m2: "Noa", m3: "Idris" };
-  const guessCards = page.locator('[data-testid="vote-card"][data-guessable="true"]');
-  const gn = await guessCards.count();
-  check("vote: exactly the six facts one teammate knew can be guessed", gn === 6 && (await page.getByTestId("guess-select").count()) === 6, `${gn} guessable cards`);
-  let made = 0;
-  let right = 0;
-  for (let i = 0; i < gn; i++) {
-    if (i === 3) continue;
-    const card = guessCards.nth(i);
-    const holders = holderOf.get(await card.locator("p").first().innerText()) ?? [];
-    const truth = nameOf[holders[0]];
-    const pick = i % 2 === 1 ? (truth === "Noa" ? "Idris" : "Noa") : truth;
-    await card.getByTestId("guess-select").selectOption({ label: `${pick} (simulated)` });
-    made++;
-    if (pick === truth) right++;
-  }
-  const stored = async () => (JSON.parse(await rawRoom(page, code)).ledger ?? []).filter((c) => c.myGuess).length;
-  for (let i = 0; i < 40 && (await stored()) < made; i++) await page.waitForTimeout(250);
-  check("vote: the guesses are stored before the vote is sealed", (await stored()) === made && made === 5 && right === 3, `${await stored()} stored; ${right} of ${made} right by the scenario`);
-  await page.getByTestId("expect-same").selectOption("0"); // "none of the other two will pick what I pick"
+  // A practice room (and its replay) asks for ratings and one vote only. The two optional guesses belong to live rooms.
+  const guessUi = { select: await page.getByTestId("guess-select").count(), expect: await page.getByTestId("expect-same").count(), box: await page.getByTestId("optional-guesses").count() };
+  check("vote: practice asks neither 'who knew it' nor 'how many will pick the same'", guessUi.select === 0 && guessUi.expect === 0 && guessUi.box === 0 && !/Who knew it|pick the same option|Optional/i.test(voteText), JSON.stringify(guessUi));
+  check("vote: the 15 facts are still listed next to the options", (await page.getByTestId("vote-card").count()) === 15);
   await page.getByRole("radio", { name: "Kelvane Desk" }).click();
   await shot("05-vote.png", true);
   await page.getByRole("button", { name: "Seal my vote" }).click();
@@ -202,19 +207,100 @@ try {
   check("reveal: changed facts are listed with their holders", (await page.getByTestId("changed-card").count()) >= 1, `${await page.getByTestId("changed-card").count()} facts`);
   const disclaimer = await page.getByTestId("disclaimer").innerText();
   check("reveal: disclaimer line", disclaimer === "Unsaid never votes or recommends. These are your team's facts and your team's weights.", disclaimer);
-  const norm = (t) => t.replace(/\s+/g, " ").trim();
-  const gw = norm(await page.getByTestId("guess-who").innerText());
-  check("reveal: guess who is labelled practice and shows only your own guesses against luck", /Practice/.test(gw) && gw.includes(`Your guesses: ${right} of ${made} right. Luck would give 50%.`) && (await page.getByTestId("guess-who").getAttribute("data-scope")) === "practice", gw.slice(0, 160));
-  check("reveal: practice shows no room-wide number", (await page.getByTestId("guess-pct").count()) === 0);
-  const alone = norm(await page.getByTestId("alone-line").innerText());
-  check("reveal: alone check says what you expected and what happened", alone === "You expected 0 of 2 to pick the same option as you. 2 did.", alone);
+  check("reveal: practice shows neither the guess-who panel nor the alone check nor a room-wide number", (await page.getByTestId("guess-who").count()) === 0 && (await page.getByTestId("alone-check").count()) === 0 && (await page.getByTestId("guess-pct").count()) === 0);
+  const more = page.getByTestId("more-detail");
+  const moreSummary = norm(await page.getByTestId("more-detail-summary").innerText());
+  check("reveal: 'More detail' is closed and holds only the table of all 15 cards", (await more.evaluate((el) => !el.open)) && moreSummary === "More detail (all 15 cards)", moreSummary);
+  await page.getByTestId("more-detail-summary").click();
+  check("reveal: opening 'More detail' shows the 15 cards with their holders", (await more.locator("tbody tr").count()) === 15 && /Noa/.test(await more.innerText()));
+  await page.getByTestId("more-detail-summary").click();
   const revealRaw = JSON.parse(await rawRoom(page, code));
-  check("reveal: the view carries your own result only", revealRaw.reveal.guessWho.scope === "practice" && revealRaw.reveal.guessWho.result.guesses === made && revealRaw.reveal.guessWho.result.right === right && JSON.stringify(revealRaw.reveal.aloneCheck) === JSON.stringify({ expected: 0, actual: 2, others: 2 }));
+  check("reveal: the view carries your own picks and the full ledger", revealRaw.reveal.viewer.vote === "A" && revealRaw.reveal.viewer.initialPick === "B" && revealRaw.reveal.cards.length === 15 && revealRaw.reveal.uniqueCount === 9);
   const picks = await page.getByTestId("picks").innerText();
   check("reveal: leans and votes of simulated teammates are shown", /Noa[\s\S]*simulated[\s\S]*Leaned to\s+Brightpane Chat[\s\S]*voted\s+Kelvane Desk/i.test(picks));
   await page.evaluate(() => window.scrollTo(0, 0));
   await shot("06-reveal.png", false);
   await shot("07-reveal-full.png", true);
+
+  // ---- replay: "See the trap in 20 seconds" opens a finished scripted room at its reveal -------------------------------
+  // The numbers below are the scenario's own (server/domain/replay.test.ts computes them from the same file); a change to the
+  // scoring or the scenario must fail here before it reaches a video or a README.
+  const callsBefore = modelCalls();
+  const fits = (sel) =>
+    page.evaluate((s) => {
+      for (const el of document.querySelectorAll("*")) if (el.scrollTop) el.scrollTop = 0; // the page scrolls inside the sidebar layout's container
+      const els = [...document.querySelectorAll(s)];
+      const last = els.at(-1)?.getBoundingClientRect();
+      return { n: els.length, bottom: last ? Math.round(last.bottom) : null, height: window.innerHeight, width: window.innerWidth };
+    }, sel);
+  for (const [w, h] of [[1280, 720], [375, 812]]) {
+    await page.setViewportSize({ width: w, height: h });
+    await page.goto(`${BASE}/`);
+    await page.getByTestId("see-trap").waitFor();
+    await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+    const f = await fits('[data-testid="see-trap"]');
+    check(`home ${w}x${h}: the main button is on the first screen without scrolling`, f.n === 1 && f.bottom !== null && f.bottom <= f.height, `button bottom ${f.bottom} of ${f.height}`);
+  }
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto(`${BASE}/`);
+  await page.getByTestId("see-trap").waitFor();
+  await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+
+  // A slow failure first: the button says it is working, then the error appears next to a way out, and nothing navigates.
+  await page.route("**/create-replay-room", async (route) => {
+    await new Promise((r) => setTimeout(r, 1200));
+    await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "The replay could not be opened.", errorCode: "internal" }) });
+  });
+  await page.getByTestId("see-trap").click();
+  await page.waitForFunction(() => document.querySelector('[data-testid="see-trap"]')?.getAttribute("aria-busy") === "true", null, { timeout: 2000 });
+  const busyButton = page.getByTestId("see-trap");
+  check("replay button: while the room opens it says so and cannot be pressed twice", (await busyButton.isDisabled()) && norm(await busyButton.innerText()) === "Opening...");
+  await page.getByTestId("see-trap-error").waitFor({ timeout: 6000 });
+  const errText = norm(await page.getByTestId("see-trap-error").innerText());
+  check("replay button: a failure shows a message and the 3-minute practice as the way out, and the button works again", /\S/.test(errText) && !/undefined|\[object/.test(errText) && /Start the 3-minute practice instead/.test(errText) && (await busyButton.isEnabled()) && !page.url().includes("/r/"), errText);
+  await page.unroute("**/create-replay-room");
+
+  await page.getByTestId("see-trap").click();
+  await page.waitForURL(/\/r\/[A-Z0-9]{4,12}$/);
+  await phase("reveal");
+  await page.getByTestId("proof-panel").waitFor();
+  const replayCode = page.url().split("/r/")[1];
+  const text = (id) => page.getByTestId(id).innerText().then(norm);
+  const num = async (ids) => Object.fromEntries(await Promise.all(ids.map(async (id) => [id, await text(`proof-${id}`)])));
+  const alone = await num(["alone-m1", "alone-m2", "alone-m3"]);
+  check("replay: each person alone points to Brightpane Chat (You 4.67, Noa 5.00, Idris 5.00)", alone["alone-m1"] === "4.67" && alone["alone-m2"] === "5.00" && alone["alone-m3"] === "5.00", JSON.stringify(alone));
+  const shared = await num(["shared-A", "shared-B", "shared-C"]);
+  check("replay: with only the facts everyone already knew, Brightpane Chat 7.33 leads Kelvane Desk -2.33 and Cobbleline Basic -1.67", shared["shared-A"] === "-2.33" && shared["shared-B"] === "7.33" && shared["shared-C"] === "-1.67", JSON.stringify(shared));
+  const fullScores = await num(["full-A", "full-B", "full-C"]);
+  check("replay: with every fact, Kelvane Desk 10.33 leads Brightpane Chat 0.00 and Cobbleline Basic -1.67", fullScores["full-A"] === "10.33" && fullScores["full-B"] === "0.00" && fullScores["full-C"] === "-1.67", JSON.stringify(fullScores));
+  const votes = await num(["votes-A", "votes-B", "votes-C"]);
+  check("replay: final votes are Kelvane Desk 3, Brightpane Chat 0, Cobbleline Basic 0", votes["votes-A"] === "3" && votes["votes-B"] === "0" && votes["votes-C"] === "0", JSON.stringify(votes));
+  const head = await text("reveal-headline");
+  check("replay: the headline is the whole claim in two sentences, merged into the proof panel", head.startsWith("In this replay all three (one scripted, two simulated) leaned to Brightpane Chat. With every fact on the table the ledger points to Kelvane Desk."), head.slice(0, 170));
+  check("replay: four proof rows, the headline on the same card, the scripted caption", (await page.locator('[data-testid^="proof-row-"]').count()) === 4 && (await page.getByTestId("reveal-headline").getByTestId("proof-panel").count()) === 1 && /^Scripted example, not a measurement of a real team/.test(await text("replay-caption")));
+  check("replay: the team's own-facts line is there", /Your own facts alone point to Brightpane Chat\. Your facts and the team's facts disagree\./.test(await text("headline-own")));
+  check("replay: no guess-who, alone check or guess question", (await page.getByTestId("guess-who").count()) === 0 && (await page.getByTestId("alone-check").count()) === 0 && (await page.getByTestId("guess-select").count()) === 0);
+  const rb = page.getByTestId("practice-banner");
+  check("replay: the banner says scripted and simulated and offers the 3-minute practice", (await rb.getAttribute("data-replay")) === "true" && /Replay of a scripted team/.test(await rb.innerText()) && /simulated/.test(await rb.innerText()) && /Do it yourself \(3 min\)/.test(await rb.innerText()), norm(await rb.innerText()));
+  const replayRaw = JSON.parse(await rawRoom(page, replayCode));
+  check("replay: the view says replay, reveal, 15 cards, 9 known by one person", replayRaw.practice?.replay === true && replayRaw.phase === "reveal" && replayRaw.reveal.cards.length === 15 && replayRaw.reveal.uniqueCount === 9 && replayRaw.reveal.members.filter((m) => m.simulated).length === 2);
+  for (const [w, h] of [[1280, 720], [375, 812]]) {
+    await page.setViewportSize({ width: w, height: h });
+    await page.waitForTimeout(300);
+    const f = await fits('[data-testid^="proof-row-"]');
+    check(`replay ${w}x${h}: all 4 proof rows are on the first screen without scrolling`, f.n === 4 && f.bottom !== null && f.bottom <= f.height, `last row bottom ${f.bottom} of ${f.height} (innerWidth ${f.width})`);
+  }
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const callsAfter = modelCalls();
+  if (callsBefore === null) console.log("SKIP replay: zero model calls (no STUB_LOG given)");
+  else check("replay: the whole replay path, from the click to the reveal, made zero model calls", callsAfter === callsBefore, `${callsBefore} calls before, ${callsAfter} after`);
+
+  // The way on: "Do it yourself (3 min)" in the replay banner opens a normal practice room at the notes.
+  await page.getByTestId("replay-to-practice").click();
+  await page.waitForURL((u) => /\/r\/[A-Z0-9]{4,12}$/.test(u.pathname) && !u.pathname.endsWith(replayCode));
+  await phase("notes");
+  const nb = page.getByTestId("practice-banner");
+  check("replay: 'Do it yourself (3 min)' opens a normal practice room at the notes", (await nb.getAttribute("data-replay")) === null && (await page.getByTestId("notes-input").inputValue()).length > 100);
 
   assertClean(p);
   check("guest path: no sign-in, no 401/403 beyond the known probe, no page errors", true);

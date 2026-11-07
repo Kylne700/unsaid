@@ -46,6 +46,11 @@
   --input: 0 0% 55%;
 }
 
+/* Netlify's free-plan badge is an iframe fixed at the bottom right (194x64 px) and would lie on the chat box's Dictate and Send buttons: the panel keeps that strip free. */
+.agent-sidebar-panel {
+  padding-bottom: 4.5rem;
+}
+
 .chat-layout-shell {
   --agent-layout-left-drawer-expanded-width: var(--chat-sidebar-width);
   --agent-layout-left-drawer-collapsed-width: 3rem;

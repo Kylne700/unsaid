@@ -13,7 +13,8 @@ export function Shell({ children, right }: { children: ReactNode; right?: ReactN
           <div className="text-sm text-muted-foreground">{right}</div>
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-6 py-4 sm:py-8">{children}</main>
+      {/* pb-20: Netlify's free-plan badge (fixed, bottom right, 64 px high) must never sit on the last control of a page. */}
+      <main className="mx-auto max-w-6xl px-6 pb-20 pt-4 sm:pt-8">{children}</main>
     </div>
   );
 }

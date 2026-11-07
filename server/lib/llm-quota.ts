@@ -31,15 +31,23 @@ async function take(day: string, bucket: string, cap: number): Promise<boolean> 
   return rows.length === 1;
 }
 
-/** True when this member and the app both have requests left today. Reads only; nothing is taken. */
-export async function hasLlmRoom(member: string, now = new Date()): Promise<boolean> {
-  if (now.getTime() < pausedUntil) return false;
+/** "ok": a request can go out. "busy": the short pause after a 429. "capped": this member or the app used its day. */
+export type LlmRoom = "ok" | "busy" | "capped";
+
+/** Whether this member and the app can ask the model now, and if not, why. Reads only; nothing is taken. */
+export async function llmRoom(member: string, now = new Date()): Promise<LlmRoom> {
+  if (now.getTime() < pausedUntil) return "busy";
   const rows = await getDb()
     .select({ bucket: unsaidLlmUsage.bucket, count: unsaidLlmUsage.count })
     .from(unsaidLlmUsage)
     .where(and(eq(unsaidLlmUsage.day, utcDay(now)), inArray(unsaidLlmUsage.bucket, [APP, member])));
   const used = (b: string) => rows.find((r) => r.bucket === b)?.count ?? 0;
-  return used(APP) < APP_DAILY_CAP && used(member) < MEMBER_DAILY_CAP;
+  return used(APP) < APP_DAILY_CAP && used(member) < MEMBER_DAILY_CAP ? "ok" : "capped";
+}
+
+/** True when this member and the app both have requests left today and no pause is running. */
+export async function hasLlmRoom(member: string, now = new Date()): Promise<boolean> {
+  return (await llmRoom(member, now)) === "ok";
 }
 
 /** Takes one real request for `member`. False means a cap is reached and the model must not be called. */

@@ -2,7 +2,7 @@
 import { getDbExec } from "@agent-native/core/db";
 import { beforeAll, describe, expect, it } from "vitest";
 import { MIGRATIONS } from "../db/migrations";
-import { APP_DAILY_CAP, hasLlmRoom, MEMBER_DAILY_CAP, pauseLlm, takeLlmRequest } from "./llm-quota";
+import { APP_DAILY_CAP, hasLlmRoom, llmRoom, MEMBER_DAILY_CAP, pauseLlm, takeLlmRequest } from "./llm-quota";
 
 beforeAll(async () => {
   for (const m of MIGRATIONS) await getDbExec().execute(m.sql as string);
@@ -55,5 +55,17 @@ describe("llm quota", () => {
     expect(await takeLlmRequest("member:Q5:m1", new Date(t + 59_000))).toBe(false);
     expect(await hasLlmRoom("member:Q5:m1", new Date(t + 59_000))).toBe(false);
     expect(await takeLlmRequest("member:Q5:m1", new Date(t + 60_000))).toBe(true);
+  });
+
+  // Last on purpose: the pause is module state, and it runs on until t + 60 s.
+  it("llmRoom tells a busy minute from a used-up day, so the chat can say the right thing", async () => {
+    const t = Date.parse("2020-03-08T10:00:00Z");
+    await setUsed("2020-03-08", "member:Q6:m1", MEMBER_DAILY_CAP);
+    expect(await llmRoom("member:Q6:m1", new Date(t - 1_000))).toBe("capped"); // no pause yet
+    pauseLlm(60_000, t);
+    expect(await llmRoom("member:Q6:m1", new Date(t + 1_000))).toBe("busy"); // the pause comes first, even for a member at the cap
+    expect(await llmRoom("member:Q6:m2", new Date(t + 59_999))).toBe("busy");
+    expect(await llmRoom("member:Q6:m1", new Date(t + 60_000))).toBe("capped");
+    expect(await llmRoom("member:Q6:m2", new Date(t + 60_000))).toBe("ok"); // other members are fine once it ends
   });
 });

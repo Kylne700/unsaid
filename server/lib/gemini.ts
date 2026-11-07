@@ -8,12 +8,14 @@
 import { createAISDKEngine, registerAgentEngine, type AgentEngine, type EngineEvent, type EngineStreamOptions } from "@agent-native/core/agent/engine";
 import { completeText } from "@agent-native/core/server";
 import { boundSeat, seatBucket } from "./guest";
-import { hasLlmRoom, pauseLlm, takeLlmRequest } from "./llm-quota";
+import { hasLlmRoom, llmRoom, pauseLlm, takeLlmRequest, type LlmRoom } from "./llm-quota";
 
 export const GEMINI_MODEL = "gemini-3.5-flash-lite";
 /** The registered engine the chat runs on (selected in server/plugins/agent-native-email-branding.ts). */
 export const ENGINE_NAME = "unsaid-gemini";
 export const MAX_OUTPUT_TOKENS = 4096;
+/** One chat answer gets this long in total: under the 60 s limit of the free hosting, far above a normal answer. */
+export const CHAT_TIMEOUT_MS = 40_000;
 const STANDARD_KEY_NAMES = ["GOOGLE_GENERATIVE_AI_API_KEY", "GEMINI_API_KEY"];
 
 export function assertNoStandardKey(env: Record<string, string | undefined> = process.env): void {
@@ -29,10 +31,15 @@ export const geminiConfigured = () => apiKey() !== "";
 /** fetch for one quota bucket: every real request (retries included) takes a slot first; a 429 pauses all calls. */
 function quotaFetch(bucket: string): typeof fetch {
   return async (input, init) => {
-    if (!(await takeLlmRequest(bucket))) throw new Error("unsaid_llm_quota: daily Gemini limit reached");
+    if (!(await takeLlmRequest(bucket))) throw new Error("unsaid_llm_quota: no request slot (429 pause or daily limit)");
     const res = await fetch(input, init);
-    if (res.status === 429) pauseLlm(60_000);
-    return res;
+    if (res.status !== 429) return res;
+    pauseLlm(60_000);
+    // The pause already refuses the SDK's retry, so a Retry-After header must not make it wait (up to a minute) to find that out.
+    const headers = new Headers(res.headers);
+    headers.delete("retry-after");
+    headers.delete("retry-after-ms");
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
   };
 }
 
@@ -48,17 +55,83 @@ export function geminiFor(bucket: string): AgentEngine {
   });
 }
 
+// What the member reads when the model gives nothing usable. Fixed sentences: a provider's own error text never reaches the chat.
 export const NOT_IN_A_ROOM = "I only work inside an Unsaid room you have joined. Open your room and ask me there.";
 export const OUT_OF_QUOTA = "The free AI allowance for today is used up, so I can't answer right now. Everything in the room still works by hand; try me again tomorrow.";
+export const BUSY = "The AI is busy, try again in a minute; the room works without it.";
+export const NOT_ANSWERING = "The AI is not answering right now. Everything in the room still works by hand.";
+export const NOTHING_TO_ADD = "I have nothing to add. Try asking in other words.";
 
-async function* fixedReply(text: string): AsyncGenerator<EngineEvent> {
-  yield { type: "text-delta", text };
-  yield { type: "assistant-content", parts: [{ type: "text", text }] };
+/** The whole answer as a fixed text. `before` is what the model had already said: the text then closes that message. */
+async function* fixedReply(text: string, before = ""): AsyncGenerator<EngineEvent> {
+  const shown = before.trim() ? `\n\n${text}` : text;
+  yield { type: "text-delta", text: shown };
+  yield { type: "assistant-content", parts: [{ type: "text", text: before + shown }] };
   yield { type: "stop", reason: "end_turn" };
 }
 
+/**
+ * One model call with a deadline. The member reads the model's text or a fixed sentence: never a raw error, never silence.
+ * The deadline and the member's own Stop both reach the request through one abort signal; the race below also ends the chat
+ * when an engine ignores that signal.
+ */
+async function* answer(model: AgentEngine, bucket: string, opts: EngineStreamOptions, timeoutMs: number): AsyncGenerator<EngineEvent> {
+  if (opts.abortSignal.aborted) return;
+  const cancel = new AbortController();
+  const relay = () => cancel.abort(opts.abortSignal.reason);
+  opts.abortSignal.addEventListener("abort", relay, { once: true });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<"late">((resolve) => {
+    timer = setTimeout(() => resolve("late"), timeoutMs);
+  });
+  const events = model.stream({ ...opts, abortSignal: cancel.signal, model: GEMINI_MODEL, maxOutputTokens: Math.min(opts.maxOutputTokens ?? MAX_OUTPUT_TOKENS, MAX_OUTPUT_TOKENS) })[Symbol.asyncIterator]();
+  let said = ""; // the text streamed so far
+  let spoke = false; // text or a tool call came out
+  const closing: EngineEvent[] = []; // assistant-content and stop wait until it is known that the model said something
+  let problem: "late" | "error" | undefined;
+  try {
+    for (;;) {
+      const next = await Promise.race([events.next(), late]);
+      if (next === "late") {
+        problem = "late";
+        break;
+      }
+      if (next.done) break;
+      const e = next.value;
+      if (e.type === "stop" && e.reason === "error") {
+        problem = "error";
+        break;
+      }
+      if (e.type === "stop" || e.type === "assistant-content") {
+        closing.push(e);
+        continue;
+      }
+      if (e.type === "text-delta") {
+        said += e.text;
+        if (e.text.trim()) spoke = true;
+      } else if (e.type === "tool-call") spoke = true;
+      yield e;
+    }
+  } catch {
+    problem = "error";
+  } finally {
+    clearTimeout(timer);
+    opts.abortSignal.removeEventListener("abort", relay);
+    if (problem) cancel.abort();
+    void events.return?.()?.catch(() => {});
+  }
+  if (opts.abortSignal.aborted) return; // the member pressed Stop: nothing more to say
+  if (problem) {
+    // A 429 sets the pause and a used-up day shows in the counters: the quota module knows which of them it was, if any.
+    const room: LlmRoom = await llmRoom(bucket).catch(() => "ok");
+    return yield* fixedReply(room === "busy" ? BUSY : room === "capped" ? OUT_OF_QUOTA : NOT_ANSWERING, said);
+  }
+  if (!spoke) return yield* fixedReply(NOTHING_TO_ADD);
+  yield* closing;
+}
+
 /** Wraps an engine for the chat: only a guest bound to a seat, within quota, reaches `make(bucket)`. */
-export function guardedChatEngine(make: (bucket: string) => AgentEngine, meta: AgentEngine = make("meta")): AgentEngine {
+export function guardedChatEngine(make: (bucket: string) => AgentEngine, meta: AgentEngine = make("meta"), timeoutMs = CHAT_TIMEOUT_MS): AgentEngine {
   // Metadata only (models, capabilities); the wrapper keeps no key and no fetch of its own.
   const engine = Object.assign(Object.create(Object.getPrototypeOf(meta)) as AgentEngine, meta, { name: ENGINE_NAME, label: "Gemini (Unsaid)", apiKey: "", requestFetch: undefined });
   return Object.assign(engine, {
@@ -66,8 +139,9 @@ export function guardedChatEngine(make: (bucket: string) => AgentEngine, meta: A
       const seat = await boundSeat();
       if (!seat) return yield* fixedReply(NOT_IN_A_ROOM);
       const bucket = seatBucket(seat);
-      if (!(await hasLlmRoom(bucket))) return yield* fixedReply(OUT_OF_QUOTA);
-      yield* make(bucket).stream({ ...opts, model: GEMINI_MODEL, maxOutputTokens: Math.min(opts.maxOutputTokens ?? MAX_OUTPUT_TOKENS, MAX_OUTPUT_TOKENS) });
+      const room = await llmRoom(bucket);
+      if (room !== "ok") return yield* fixedReply(room === "busy" ? BUSY : OUT_OF_QUOTA);
+      yield* answer(make(bucket), bucket, opts, timeoutMs);
     },
   });
 }

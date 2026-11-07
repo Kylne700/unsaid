@@ -43,33 +43,13 @@ const GUESS_MEANING: Record<NonNullable<GuessWhoView["result"]>["verdict"], stri
 
 function GuessWho({ gw }: { gw: GuessWhoView }) {
   const r = gw.result;
-  const practice = gw.scope === "practice";
   return (
     <section aria-labelledby="guess-title" data-testid="guess-who" data-scope={gw.scope}>
       <SectionTitle hint="On the vote screen you could guess who knew a fact that only one other person knew.">
-        <span id="guess-title">Guess who</span>{" "}
-        {practice ? <Tag className="ml-1 align-middle text-muted-foreground">Practice</Tag> : null}
+        <span id="guess-title">Guess who</span>
       </SectionTitle>
       <div className="rounded-lg border bg-card p-4 text-sm">
-        {practice ? (
-          <>
-            <p data-testid="guess-practice">
-              {r ? (
-                <>
-                  <strong>
-                    Your guesses: {r.right} of {r.guesses} right.
-                  </strong>{" "}
-                  Luck would give {r.chancePct}%.
-                </>
-              ) : (
-                "You made no guesses. On the vote screen you can guess who knew a fact."
-              )}
-            </p>
-            <p className="mt-2 text-muted-foreground" data-testid="guess-meaning">
-              In a real room everyone's guesses become one number for the whole room. Close to luck means the facts were judged without names. Well above luck means people could tell who said what.
-            </p>
-          </>
-        ) : r ? (
+        {r ? (
           <>
             <p className="text-2xl font-semibold tabular-nums" data-testid="guess-pct">
               {r.rightPct}% right

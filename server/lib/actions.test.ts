@@ -8,6 +8,7 @@ import advancePhase from "../../actions/advance-phase";
 import approveDraft from "../../actions/approve-draft";
 import castVote from "../../actions/cast-vote";
 import createPracticeRoom from "../../actions/create-practice-room";
+import createReplayRoom from "../../actions/create-replay-room";
 import createRoom from "../../actions/create-room";
 import extractCardsAction from "../../actions/extract-cards";
 import getRoom from "../../actions/get-room";
@@ -117,7 +118,7 @@ describe("the module list: what the chat agent can and cannot call", () => {
   const byName = Object.fromEntries(Object.entries(mods).map(([p, m]) => [p.replace(/^.*\/([^/]+)\.ts$/, "$1"), m.default]));
   it("hides the member-only actions from the agent and keeps the rest", () => {
     const hidden = Object.keys(byName).filter((n) => byName[n]?.agentTool === false).sort();
-    expect(hidden).toEqual(["approve-draft", "cast-vote", "create-practice-room", "create-room", "guess-who", "join-room", "rate-card", "set-initial-pick"]);
+    expect(hidden).toEqual(["approve-draft", "cast-vote", "create-practice-room", "create-replay-room", "create-room", "guess-who", "join-room", "rate-card", "set-initial-pick"]);
     const visible = Object.keys(byName).filter((n) => byName[n]?.agentTool !== false).sort();
     expect(visible).toEqual(["advance-phase", "delete-draft", "extract-cards", "get-room", "mark-done", "merge-cards", "navigate", "save-draft", "save-notes", "unmerge-card", "view-screen", "withdraw-card"]);
     // no action exists that votes or recommends for the team
@@ -281,6 +282,16 @@ describe("practice room through the actions", () => {
     expect(v.notes.length).toBeGreaterThan(200);
     await expect(call(joinRoom, { code: made.code, name: "Dee" })).rejects.toMatchObject({ errorCode: "forbidden" });
     await expect(call(markDone, { ...both(made.code, made.token), done: true })).rejects.toMatchObject({ message: expect.stringContaining("Seal your lean") });
+  });
+
+  it("the replay room saves and loads as a practice room on the reveal; only the UI can start one", async () => {
+    const made = await call(createReplayRoom, {});
+    const v = (await call(getRoom, both(made.code, made.token))) as AnyView;
+    expect(v.phase).toBe("reveal");
+    expect(v.practice).toEqual({ title: expect.any(String), replay: true });
+    expect(v.reveal.options.map((o: AnyView) => o.votes)).toEqual([3, 0, 0]);
+    expect(must(await loadRoom(made.code)).practice).toMatchObject({ replay: true });
+    expect((createReplayRoom as { agentTool?: boolean }).agentTool).toBe(false);
   });
 });
 

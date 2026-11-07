@@ -103,7 +103,7 @@ export interface RoomView {
   phase: Phase;
   question: string;
   options: { id: string; name: string }[];
-  practice: { title: string } | null;
+  practice: { title: string; replay?: true } | null;
   me: { id: string; name: string; isCreator: boolean; done: boolean; hasInitialPick: boolean; hasVoted: boolean };
   members: MemberView[];
   uniqueCount: number | null;
@@ -162,7 +162,7 @@ export function viewRoom(room: Room, me: Member, opts: { agent?: boolean } = {})
     phase,
     question: room.question,
     options: publicOptions(room),
-    practice: room.practice ? { title: getScenario(room.practice.scenarioId)?.title ?? "Practice" } : null,
+    practice: room.practice ? { title: getScenario(room.practice.scenarioId)?.title ?? "Practice", ...(room.practice.replay ? { replay: true as const } : {}) } : null,
     // Only flags about the caller: never the pick or the vote itself, before the reveal.
     me: {
       id: me.id,

@@ -66,8 +66,8 @@ export interface Room {
   question: string;
   options: OptionDef[];
   creatorId: string;
-  /** Set for practice rooms ("Fall into the trap yourself"). */
-  practice: { scenarioId: string } | null;
+  /** Set for practice rooms ("Fall into the trap yourself"). `replay`: a practice room already played to its reveal ("See the trap in 20 seconds"). */
+  practice: { scenarioId: string; replay?: true } | null;
   phase: Phase;
   members: Member[];
   notes: Record<string, string>;

@@ -43,6 +43,27 @@ export function createPractice(code: string): { room: Room; token: string; membe
   return buildPracticeRoom(code, sc);
 }
 
+/**
+ * The practice room played to its reveal by a scripted You: lean to the bait, every card rated 2, vote for the option the full
+ * ledger points to. The two teammates are the simulated ones. No model is called: it is the same domain functions a visitor uses.
+ */
+export function createReplay(code: string): { room: Room; token: string; memberId: string } {
+  const sc = getScenario(DEFAULT_SCENARIO_ID);
+  const made = createPractice(code);
+  const me = memberByToken(made.room, made.token);
+  if (!sc || !me || !made.room.practice) throw new RoomError("Replay scenario missing.", "not_found");
+  setInitialPick(made.room, me, sc.bait);
+  setDone(made.room, me, true);
+  for (const d of [...made.room.drafts]) approveDraft(made.room, me, d.id);
+  setDone(made.room, me, true);
+  for (const c of made.room.cards) rateCard(made.room, me, c.id, 2);
+  setDone(made.room, me, true);
+  castVote(made.room, me, sc.best);
+  if (made.room.phase !== "reveal") throw new RoomError("The replay did not reach the reveal.", "conflict");
+  made.room.practice.replay = true;
+  return made;
+}
+
 export function joinRoom(room: Room, name: string): { memberId: string; token: string } {
   if (room.practice) throw new RoomError("Practice rooms are single-player.", "forbidden");
   needPhase(room, "notes");

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { useRoomActions } from "@/hooks/use-room";
+import { useStartRoom } from "@/hooks/use-start-room";
 import { TAB_ID } from "@/lib/tab-id";
 
 import type { RoomView } from "../../../server/domain/view";
@@ -17,6 +18,42 @@ import { RoomProvider } from "./room-context";
 import { Shell } from "./Shell";
 import { VotePhase } from "./VotePhase";
 import { WeighPhase } from "./WeighPhase";
+
+// What the chat offers depends on the phase. The sidebar reads this prop on every render, so there is no remount.
+const CHIPS: Record<RoomView["phase"], string[]> = {
+  notes: ["Help me write down what I know", "What can you do for me?"],
+  cards: ["Draft cards from my notes", "Which of my cards say the same thing?", "What can you do for me?"],
+  weigh: ["Where does the room stand?", "What can you do for me?"],
+  vote: ["Where does the room stand?", "What can you do for me?"],
+  reveal: ["How were these numbers worked out?", "What can you do for me?"],
+};
+
+const BANNER = "mb-2 rounded-md bg-sky-500/10 px-3 py-2 text-sm text-sky-900 dark:text-sky-100";
+
+/** A practice room is one line (the reason is one click away); the replay says what was scripted and offers the 3-minute path. */
+function PracticeBanner({ room }: { room: RoomView }) {
+  const practice = useStartRoom("create-practice-room");
+  if (!room.practice) return null;
+  if (!room.practice.replay) {
+    return (
+      <details className={BANNER} data-testid="practice-banner">
+        <summary className="cursor-pointer">
+          <strong>Practice room:</strong> {room.practice.title}. Your two teammates are simulated. <span className="underline">Why simulated?</span>
+        </summary>
+        <p className="mt-1">Their notes, ratings and votes are scripted so you can feel how a decision leans one way alone and points another way with every fact on the table.</p>
+      </details>
+    );
+  }
+  return (
+    <p className={BANNER} data-testid="practice-banner" data-replay="true">
+      <strong>Replay of a scripted team.</strong> Your two teammates are simulated.<span className="hidden sm:inline"> Want to do it with your own ratings?</span>{" "}
+      <button type="button" className="font-medium underline" onClick={() => void practice.go()} disabled={practice.pending} data-testid="replay-to-practice">
+        Do it yourself (3 min)
+      </button>
+      {practice.error ? <span role="alert"> {practice.error}</span> : null}
+    </p>
+  );
+}
 
 function InviteLink({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
@@ -75,7 +112,7 @@ export function RoomScreen({ code, token, room, refresh }: { code: string; token
         modelListLoading={false}
         composerPlaceholder="Ask about your notes or this room"
         emptyStateText="I help you put down what you know and turn it into cards. I never vote, rate or recommend."
-        suggestions={["Draft cards from my notes", "Where does the room stand?", "What can you do for me?"]}
+        suggestions={CHIPS[room.phase]}
       >
       <Shell
         right={
@@ -85,15 +122,11 @@ export function RoomScreen({ code, token, room, refresh }: { code: string; token
           </span>
         }
       >
-        <header className="mb-6">
-          {room.practice ? (
-            <p className="mb-2 rounded-md bg-sky-500/10 px-3 py-2 text-sm text-sky-900 dark:text-sky-100" data-testid="practice-banner">
-              <strong>Practice room:</strong> {room.practice.title}. Your two teammates are simulated: their notes, ratings and votes are scripted so you can feel how a decision goes wrong, then right.
-            </p>
-          ) : null}
+        <header className="mb-3 sm:mb-6">
+          <PracticeBanner room={room} />
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight" data-testid="question">
+              <h1 className="text-lg font-semibold tracking-tight sm:text-2xl" data-testid="question">
                 {room.question}
               </h1>
               <p className="mt-2 flex flex-wrap items-center gap-2">
@@ -117,7 +150,7 @@ export function RoomScreen({ code, token, room, refresh }: { code: string; token
           </div>
         ) : null}
 
-        <div className="mt-8" key={room.phase}>
+        <div className="mt-4 sm:mt-8" key={room.phase}>
           {room.phase === "notes" ? <NotesPhase /> : null}
           {room.phase === "cards" ? <CardsPhase /> : null}
           {room.phase === "weigh" ? <WeighPhase /> : null}

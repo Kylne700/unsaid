@@ -6,7 +6,7 @@ import { chatEngine } from "../lib/gemini";
 import { ownerFromSeatCookie } from "../lib/guest";
 
 // The agent gets the same actions as the UI, minus the ones that mint tokens or make a member's own judgment
-// (create-room, create-practice-room, join-room, set-initial-pick, rate-card, cast-vote, guess-who are agentTool:false).
+// (create-room, create-practice-room, create-replay-room, join-room, set-initial-pick, approve-draft, rate-card, cast-vote, guess-who are agentTool:false).
 const INITIAL_TOOL_NAMES = [
   "view-screen",
   "navigate",
@@ -15,7 +15,6 @@ const INITIAL_TOOL_NAMES = [
   "extract-cards",
   "save-draft",
   "delete-draft",
-  "approve-draft",
   "withdraw-card",
   "merge-cards",
   "unmerge-card",
@@ -41,7 +40,7 @@ const SYSTEM_PROMPT = `You are the Unsaid assistant inside one team decision roo
 What you do
 - Read the room with get-room. It already hides everything the current phase must hide. Call it again before every answer about the room: the room moves on, so earlier results in this chat go out of date.
 - Notes phase: help the member write down what they know (save-notes). You never choose their initial lean.
-- Cards phase: turn their notes into draft cards (extract-cards), tidy them (save-draft, delete-draft). A card is ONE fact about ONE option, as a pro or a con. The member approves it (approve-draft); only approved cards reach the shared ledger, and the room sees the whole ledger when it moves on to weigh. When two of the member's own cards state the same fact and the member agrees, merge them (merge-cards); unmerge-card undoes it.
+- Cards phase: turn their notes into draft cards (extract-cards), tidy them (save-draft, delete-draft). A card is ONE fact about ONE option, as a pro or a con. You never approve a card: you have no tool for it, and the member presses "Approve to ledger" on each draft themselves (if asked to approve one, say so and point to that button). Only approved cards reach the shared ledger, and the room sees the whole ledger when it moves on to weigh. When two of the member's own cards state the same fact and the member agrees, merge them (merge-cards); unmerge-card undoes it.
 - Weigh phase: when the member says one of their own cards (get-room marks it mine) is the same fact as another card in the list, fold their card into that one (merge-cards: keepId is the other card, absorbId is the member's own). Only on the member's request and after you have read both wordings back to them, because it cannot be undone. It works only for two cards about the same option and the same pro or con; if it is refused, say so and do not try other pairs.
 - Mark the member done (mark-done) or move the room on (advance-phase, room creator only) only when they ask you to.
 
@@ -70,7 +69,7 @@ export default createAgentChatPlugin({
   anonymousOwner: ownerFromSeatCookie,
   anonymousReadOnly: false,
   durableBackgroundRuns: false,
-  // Hard allowlist: no framework tool beyond these 13 is ever offered to the model.
+  // Hard allowlist: no framework tool beyond these 12 is ever offered to the model.
   resolveActionSurface: () => ({ allowedActionNames: INITIAL_TOOL_NAMES }),
   prepareRequest: () => ({ followUpSuggestions: false }),
   leanPrompt: true,

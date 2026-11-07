@@ -8,7 +8,7 @@ import { asMember, memberSchemas, readOwnNotes, who, WRITE } from "../server/lib
 export default defineAction({
   description:
     "Turn your private notes into draft cards (cards phase): Gemini drafts one card per fact; if AI is unavailable the notes are split into sentences. " +
-    "Drafts stay private until you approve each one.",
+    "Drafts stay private until the member approves each one themselves.",
   ...memberSchemas({}),
   ...WRITE,
   run: async ({ code, token }, ctx) => {

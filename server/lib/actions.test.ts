@@ -1,4 +1,5 @@
 // The seal at the action layer: the same functions the UI and the chat agent call, through a real (in-memory) database.
+import { readFileSync } from "node:fs";
 import type { ActionCaller, ActionRunContext } from "@agent-native/core/action";
 import { getDbExec } from "@agent-native/core/db";
 import { runWithRequestContext } from "@agent-native/core/server";
@@ -74,6 +75,24 @@ describe("caller allowlist for a member's own judgment", () => {
     expect((await r.view(r.who.ana)).me.hasInitialPick).toBe(true);
   });
 
+  it("approve-draft is refused for the agent and every other non-UI caller; the draft stays a draft until the member's own click", async () => {
+    const r = await newRoom();
+    for (const t of [r.who.ana, r.who.ben, r.who.cy]) await call(markDone, { ...both(r.code, t), done: true });
+    await call(saveDraft, { ...both(r.code, r.who.ana), text: "Lisbon has cheap flights.", option: "A", polarity: "pro" });
+    const draftId = must(((await r.view(r.who.ana)).drafts as AnyView[])[0]).id as string;
+    const notUi = ALL_CALLERS.filter((c) => c !== "http" && c !== "frontend");
+    for (const caller of notUi) await expect(call(approveDraft, { ...both(r.code, r.who.ana), draftId }, caller), caller).rejects.toMatchObject({ errorCode: "own_judgment_only", statusCode: 403 });
+    // the chat agent as it really runs: bound to Ana's seat, no code or token in its arguments
+    await expect(agent(r.code, r.who.ana, approveDraft, { draftId })).rejects.toMatchObject({ errorCode: "own_judgment_only", statusCode: 403 });
+    const refused = await r.view(r.who.ana);
+    expect(refused.drafts).toHaveLength(1); // nothing was approved by the refused calls
+    expect(refused.ledger).toHaveLength(0);
+    await call(approveDraft, { ...both(r.code, r.who.ana), draftId }, "frontend");
+    const approved = await r.view(r.who.ana);
+    expect(approved.drafts).toHaveLength(0);
+    expect(approved.ledger).toHaveLength(1);
+  });
+
   it("rate-card and cast-vote are refused for the agent in the same way", async () => {
     const r = await newRoom();
     for (const t of [r.who.ana, r.who.ben, r.who.cy]) await call(markDone, { ...both(r.code, t), done: true });
@@ -98,11 +117,19 @@ describe("the module list: what the chat agent can and cannot call", () => {
   const byName = Object.fromEntries(Object.entries(mods).map(([p, m]) => [p.replace(/^.*\/([^/]+)\.ts$/, "$1"), m.default]));
   it("hides the member-only actions from the agent and keeps the rest", () => {
     const hidden = Object.keys(byName).filter((n) => byName[n]?.agentTool === false).sort();
-    expect(hidden).toEqual(["cast-vote", "create-practice-room", "create-room", "guess-who", "join-room", "rate-card", "set-initial-pick"]);
+    expect(hidden).toEqual(["approve-draft", "cast-vote", "create-practice-room", "create-room", "guess-who", "join-room", "rate-card", "set-initial-pick"]);
     const visible = Object.keys(byName).filter((n) => byName[n]?.agentTool !== false).sort();
-    expect(visible).toEqual(["advance-phase", "approve-draft", "delete-draft", "extract-cards", "get-room", "mark-done", "merge-cards", "navigate", "save-draft", "save-notes", "unmerge-card", "view-screen", "withdraw-card"]);
+    expect(visible).toEqual(["advance-phase", "delete-draft", "extract-cards", "get-room", "mark-done", "merge-cards", "navigate", "save-draft", "save-notes", "unmerge-card", "view-screen", "withdraw-card"]);
     // no action exists that votes or recommends for the team
     expect(Object.keys(byName).filter((n) => /recommend|suggest|decide|choose/.test(n))).toEqual([]);
+  });
+
+  it("the chat plugin's hard allowlist offers the model exactly the visible actions, never approve-draft", () => {
+    const src = readFileSync(new URL("../plugins/agent-chat.ts", import.meta.url), "utf8");
+    const body = must(/INITIAL_TOOL_NAMES = \[([^\]]*)\]/.exec(src)?.[1]);
+    const offered = [...body.matchAll(/"([a-z-]+)"/g)].map((m) => m[1]).sort();
+    expect(offered).toEqual(Object.keys(byName).filter((n) => byName[n]?.agentTool !== false).sort());
+    expect(offered).not.toContain("approve-draft");
   });
 });
 
@@ -263,7 +290,6 @@ describe("the chat agent acts only as the seat its run is bound to", () => {
   // Every room tool the agent has, with valid arguments for it.
   const ROOM_TOOLS: Record<string, Record<string, unknown>> = {
     "advance-phase": {},
-    "approve-draft": { draftId: "d1" },
     "delete-draft": { draftId: "d1" },
     "extract-cards": {},
     "get-room": {},

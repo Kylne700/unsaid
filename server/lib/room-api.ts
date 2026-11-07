@@ -54,7 +54,7 @@ export const WRITE = {
 const OWN_JUDGMENT_CALLERS = new Set(["http", "frontend"]);
 export function requireOwnJudgment(ctx: ActionRunContext | undefined): void {
   if (!ctx || !OWN_JUDGMENT_CALLERS.has(ctx.caller)) {
-    fail("Initial picks, ratings and votes belong to each member. The agent never makes them.", { errorCode: "own_judgment_only", statusCode: 403 });
+    fail("Initial picks, card approvals, ratings and votes belong to each member. The agent never makes them.", { errorCode: "own_judgment_only", statusCode: 403 });
   }
 }
 

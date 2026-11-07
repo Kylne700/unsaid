@@ -4,15 +4,19 @@ publish = "dist"
 functions = ".netlify/functions-internal"
 
 [build.environment]
-GA_MEASUREMENT_ID = "G-ESF7FYXGN9"
-GTM_CONTAINER_ID = "GTM-N3WSTXZ"
 NITRO_PRESET = "netlify"
 NPM_CONFIG_PRODUCTION = "false"
+# Framework telemetry off for the build and CLI (names: @agent-native/core dist/cli/telemetry-settings.js).
+DO_NOT_TRACK = "1"
+AGENT_NATIVE_TELEMETRY_DISABLED = "1"
+# Unsaid has no recurring jobs. Without these two the build emits a scheduled function that fires every
+# minute ("* * * * *"): it burns Netlify compute credits and keeps the database awake all day.
+AGENT_NATIVE_DISABLE_RECURRING_JOBS = "1"
+AGENT_CHAT_DURABLE_BACKGROUND = "false"
 
 [context.production.environment]
-AGENT_NATIVE_HOSTED_HARNESS = "true"
 AGENT_NATIVE_DISABLE_KEEP_WARM_BACKGROUND = "1"
-BETTER_AUTH_TRUSTED_ORIGINS = "https://starter.agent-native.com,https://chat.agent-native.com"
+BETTER_AUTH_TRUSTED_ORIGINS = "https://unsaid-room.netlify.app"
 # Production release migrations own schema setup; request functions must skip
 # migration probes on every serverless invocation.
 AGENT_NATIVE_RELEASE_MIGRATIONS = "1"

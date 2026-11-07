@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useStartRoom } from "@/hooks/use-start-room";
 import { normalizeCodeInput, saveToken } from "@/lib/room-token";
 
 import { errorText } from "@/components/unsaid/bits";
@@ -24,18 +25,57 @@ const STEPS = [
   ["Reveal", "Votes open. See which facts only one of you knew, and what they changed."],
 ] as const;
 
-function TrapCard() {
-  const navigate = useNavigate();
-  const make = useActionMutation("create-practice-room");
-  async function go() {
-    try {
-      const r = await make.mutateAsync({});
-      saveToken(r.code, r.token);
-      navigate(`/r/${r.code}`);
-    } catch {
-      // make.error carries the message
-    }
-  }
+type Started = ReturnType<typeof useStartRoom>;
+
+const STUDY_DOI = "https://doi.org/10.1037/0022-3514.48.6.1467";
+const FACILITATOR_URL = "https://arxiv.org/abs/2508.08242";
+
+/** The result first, then the one big button: the replay opens already at the reveal. */
+function ProofStrip({ replay, practice }: { replay: Started; practice: Started }) {
+  const busy = replay.pending || practice.pending;
+  return (
+    <div className="mt-6 max-w-3xl rounded-xl border bg-card p-4 sm:p-6" data-testid="proof-strip">
+      <p className="text-xl font-semibold leading-snug sm:text-2xl" data-testid="proof-result">
+        <span className="block">Alone, each of three teammates leans to Brightpane Chat.</span>
+        <span className="block">With all 15 facts on the table, the ledger points to Kelvane Desk.</span>
+      </p>
+      <p className="mt-2 text-sm text-muted-foreground">A scripted example with two simulated teammates. 9 of the 15 facts were known to only one person.</p>
+      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <Button size="lg" onClick={() => void replay.go()} disabled={busy} aria-busy={replay.pending} data-testid="see-trap">
+          {replay.pending ? "Opening..." : "See the trap in 20 seconds"}
+        </Button>
+        <p className="text-sm text-muted-foreground">No sign-up. No AI needed for this demo.</p>
+      </div>
+      {replay.error ? (
+        <p role="alert" className={`mt-3 text-sm ${errorText}`} data-testid="see-trap-error">
+          {replay.error}{" "}
+          <button type="button" className="underline" onClick={() => void practice.go()} disabled={busy}>
+            Start the 3-minute practice instead
+          </button>
+        </p>
+      ) : null}
+      <div className="mt-5 space-y-2 border-t pt-4 text-sm text-muted-foreground">
+        <p data-testid="proof-study">
+          The pattern is old. In a 1985 experiment (
+          <a className="underline" href={STUDY_DOI} target="_blank" rel="noreferrer">
+            Stasser and Titus
+          </a>
+          ), 83% of 18 groups that all held the full facts chose the candidate those facts pointed to, but only 18% of 38 groups did when the facts were split between members. That was a different experiment: it explains why this matters, it does not measure this tool.
+        </p>
+        <p data-testid="proof-structure">
+          Structure, not an AI facilitator: in a{" "}
+          <a className="underline" href={FACILITATOR_URL} target="_blank" rel="noreferrer">
+            2025 Microsoft Research experiment
+          </a>{" "}
+          with 281 groups, a GPT-4o facilitator got more facts said out loud but did not significantly improve the final choice.
+        </p>
+        <p>We have not tested whether it helps real teams.</p>
+      </div>
+    </div>
+  );
+}
+
+function TrapCard({ start }: { start: Started }) {
   return (
     <Card>
       <CardHeader>
@@ -45,12 +85,12 @@ function TrapCard() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <Button size="lg" onClick={() => void go()} disabled={make.isPending} data-testid="try-trap">
-          Try the trap (3 min)
+        <Button size="lg" variant="outline" onClick={() => void start.go()} disabled={start.pending} aria-busy={start.pending} data-testid="try-trap">
+          {start.pending ? "Opening..." : "Do it yourself (3 min)"}
         </Button>
-        {make.error ? (
+        {start.error ? (
           <p role="alert" className={`mt-3 text-sm ${errorText}`}>
-            {actionErrorMessage(make.error)}
+            {start.error}
           </p>
         ) : null}
       </CardContent>
@@ -77,7 +117,7 @@ function JoinCard() {
           }}
         >
           <Input aria-label="Room code" placeholder="Room code" className="font-mono uppercase tracking-widest" maxLength={12} value={code} onChange={(e) => setCode(e.target.value)} />
-          <Button type="submit" variant="secondary" disabled={clean.length < 4}>
+          <Button type="submit" variant="outline" disabled={clean.length < 4}>
             Join
           </Button>
         </form>
@@ -147,7 +187,7 @@ function StartRoomCard() {
             <Label htmlFor="n">Your name</Label>
             <Input id="n" maxLength={40} placeholder="e.g. Dana" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
-          <Button type="submit" disabled={!valid || make.isPending} data-testid="start-room">
+          <Button type="submit" variant="outline" disabled={!valid || make.isPending} data-testid="start-room">
             Start a room
           </Button>
           {make.error ? (
@@ -162,6 +202,8 @@ function StartRoomCard() {
 }
 
 export default function Home() {
+  const replay = useStartRoom("create-replay-room");
+  const practice = useStartRoom("create-practice-room");
   return (
     <Shell>
       <section className="max-w-3xl">
@@ -171,9 +213,11 @@ export default function Home() {
         </p>
       </section>
 
+      <ProofStrip replay={replay} practice={practice} />
+
       <div className="mt-10 grid items-start gap-6 lg:grid-cols-2">
         <div className="space-y-6">
-          <TrapCard />
+          <TrapCard start={practice} />
           <JoinCard />
         </div>
         <StartRoomCard />

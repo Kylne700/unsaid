@@ -36,6 +36,13 @@ const shot = async (name, full = false) => {
   await snapBoth(page, name.replace(/\.png$/, ""));
 };
 const phase = (name) => page.waitForSelector(`[data-testid="phase-bar"][data-phase="${name}"]`, { timeout: 15000 });
+// The room scrolls inside the sidebar layout's container. A new phase must start at its top (the reveal headline is the first thing you see).
+const SURFACE = ".agent-sidebar-main-surface";
+const scrollDown = () => page.evaluate((sel) => { const el = document.querySelector(sel); el?.scrollTo({ top: el.scrollHeight }); return Math.round(el?.scrollTop ?? -1); }, SURFACE);
+const startsAtTop = async (from, to) => {
+  const ok = await page.waitForFunction((sel) => document.querySelector(sel)?.scrollTop === 0, SURFACE, { timeout: 2000 }).then(() => true, () => false);
+  check(`${from} -> ${to}: the new phase starts at the top of the page`, ok);
+};
 
 try {
   await page.goto(`${BASE}/`);
@@ -157,8 +164,11 @@ try {
   check("cards: same fact held by all three is one card", sharedCards === 6, `${sharedCards} cards with 3 holders`);
   await page.evaluate(() => window.scrollTo(0, 0));
   await shot("03-cards.png", true);
+  const cardsDown = await scrollDown();
+  check("cards: the page is long enough to be scrolled down before 'I'm done' (so the next check proves something)", cardsDown > 200, `scrolled ${cardsDown} px`);
   await page.getByRole("button", { name: "I'm done", exact: true }).click();
   await phase("weigh");
+  await startsAtTop("cards", "weigh");
 
   // ---- weigh (blind) -------------------------------------------------------------------------
   const weighCards = page.getByTestId("weigh-card");
@@ -177,8 +187,10 @@ try {
   await page.waitForTimeout(600); // let the progress bar and button transitions finish before the picture
   await shot("04-weigh.png", true);
   await page.waitForFunction(() => !document.querySelector('[data-testid="phase-bar"] button[disabled]'), null, { timeout: 8000 });
+  await scrollDown();
   await page.getByRole("button", { name: "I'm done", exact: true }).click();
   await phase("vote");
+  await startsAtTop("weigh", "vote");
 
   // ---- vote ----------------------------------------------------------------------------------
   const voteText = await page.locator("main").innerText();
@@ -187,13 +199,32 @@ try {
   const guessUi = { select: await page.getByTestId("guess-select").count(), expect: await page.getByTestId("expect-same").count(), box: await page.getByTestId("optional-guesses").count() };
   check("vote: practice asks neither 'who knew it' nor 'how many will pick the same'", guessUi.select === 0 && guessUi.expect === 0 && guessUi.box === 0 && !/Who knew it|pick the same option|Optional/i.test(voteText), JSON.stringify(guessUi));
   check("vote: the 15 facts are still listed next to the options", (await page.getByTestId("vote-card").count()) === 15);
+  // One column per option on a desktop; on a phone the facts and the choices stack, one option per row (three columns of 100 px cannot hold a sentence).
+  const columns = () =>
+    page.evaluate((sel) => {
+      const read = (el) => ({ cols: getComputedStyle(el).gridTemplateColumns.split(" ").length, width: Math.round(el.getBoundingClientRect().width), kids: [...el.children].map((c) => Math.round(c.getBoundingClientRect().width)) });
+      const main = document.querySelector(sel);
+      return { facts: read(document.querySelector('section[aria-labelledby="facts-title"] > div:last-of-type')), choice: read(document.querySelector('[role="radiogroup"]')), sideways: main.scrollWidth > main.clientWidth || document.documentElement.scrollWidth > innerWidth };
+    }, SURFACE);
+  const wide = await columns();
+  check("vote 1280x800: one column per option, in the facts and in the final-vote choices", wide.facts.cols === 3 && wide.choice.cols === 3 && wide.facts.kids.every((w) => w < wide.facts.width / 2) && !wide.sideways, JSON.stringify(wide));
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.waitForTimeout(300);
+  const narrow = await columns();
+  check("vote 375x812: the facts and the choices stack in one full-width column, with no sideways scroll", narrow.facts.cols === 1 && narrow.choice.cols === 1 && narrow.facts.kids.every((w) => w >= narrow.facts.width - 1) && narrow.choice.kids.every((w) => w >= narrow.choice.width - 1) && narrow.facts.width >= 300 && !narrow.sideways, JSON.stringify(narrow));
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.waitForTimeout(300);
   await page.getByRole("radio", { name: "Kelvane Desk" }).click();
   await shot("05-vote.png", true);
+  await scrollDown();
   await page.getByRole("button", { name: "Seal my vote" }).click();
 
   // ---- reveal --------------------------------------------------------------------------------
   await phase("reveal");
   await page.getByTestId("reveal").waitFor();
+  await startsAtTop("vote", "reveal");
+  const arrival = await page.getByTestId("reveal-headline").locator("h2").boundingBox();
+  check("reveal: you land on the headline, fully in view", !!arrival && arrival.y >= 0 && arrival.y + arrival.height <= 800, JSON.stringify(arrival));
   // Nothing can change after the reveal, so the room is not read any more (the last read is the one that brought the reveal).
   await page.waitForTimeout(1000);
   const revealFrom = Date.now();

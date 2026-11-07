@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-import { knownBy, OptionTag, PolarityMark, SectionTitle, selectClass } from "./bits";
+import { knownBy, OPTION_COLUMNS, optionColumns, OptionTag, PolarityMark, SectionTitle, selectClass } from "./bits";
 import { useRoomCtx } from "./room-context";
 
 export function VotePhase() {
@@ -52,7 +52,7 @@ export function VotePhase() {
         <SectionTitle hint="The ledger as the team approved it, with how many people knew each fact and how much you said it matters. Names come with the reveal.">
           <span id="facts-title">The facts on the table</span>
         </SectionTitle>
-        <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${room.options.length}, minmax(0, 1fr))` }}>
+        <div className={cn(OPTION_COLUMNS, "gap-4")} style={optionColumns(room.options.length)}>
           {room.options.map((o) => (
             <div key={o.id} className="min-w-0">
               <h3 className="mb-2">
@@ -85,7 +85,7 @@ export function VotePhase() {
         <SectionTitle hint="One vote, and it is final. Nobody sees any vote until the reveal, and nothing here recommends an option.">
           <span id="vote-title">Your final vote</span>
         </SectionTitle>
-        <div role="radiogroup" aria-labelledby="vote-title" className="grid gap-2" style={{ gridTemplateColumns: `repeat(${room.options.length}, minmax(0, 1fr))` }}>
+        <div role="radiogroup" aria-labelledby="vote-title" className={cn(OPTION_COLUMNS, "gap-2")} style={optionColumns(room.options.length)}>
           {room.options.map((o) => {
             const on = choice === o.id;
             return (

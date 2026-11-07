@@ -128,6 +128,11 @@ export function RoomScreen({ code, token, room, refresh, paused }: { code: strin
   const beforeDone = useRef<(() => Promise<boolean | void>) | null>(null);
   const ctx = useMemo(() => ({ room, run, busy, error, beforeDone }), [room, run, busy, error]);
   useSeatCookie(code, token);
+  // A new phase is a new screen: start it at the top (the reveal used to open scrolled past its own headline).
+  useEffect(() => {
+    // shortcut: reaches the framework's scroll box by its class name; use a ref if the framework adds one
+    document.querySelector(".agent-sidebar-main-surface")?.scrollTo({ top: 0 });
+  }, [room.phase]);
 
   return (
     <RoomProvider value={ctx}>

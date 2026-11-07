@@ -31,9 +31,9 @@ export function PhaseBar() {
   return (
     <section aria-label="Room progress" className={cn("rounded-lg border bg-card p-4", room.practice?.replay && "sr-only")} data-testid="phase-bar" data-phase={phase}>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <ol className="flex items-center gap-1.5 text-sm">
+        <ol className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
           {STEPS.map((s, i) => (
-            <li key={s.id} className="flex items-center gap-1.5">
+            <li key={s.id} className="flex items-center">
               <span
                 aria-current={i === at ? "step" : undefined}
                 className={cn(
@@ -44,7 +44,6 @@ export function PhaseBar() {
                 {i < at ? <IconCheck size={14} stroke={2.5} aria-hidden /> : null}
                 {s.label}
               </span>
-              {i < STEPS.length - 1 ? <span aria-hidden className="text-muted-foreground">/</span> : null}
             </li>
           ))}
         </ol>

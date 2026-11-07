@@ -1,9 +1,13 @@
 // Small pieces every phase uses: option tags, pro/con marks, "simulated" labels, names for lists of options.
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
 export type OptionLite = { id: string; name: string };
+
+/** One column per option from `sm` up, one column on a phone (a third of 375 px holds about 12 characters). Pair with `optionColumns(n)`. */
+export const OPTION_COLUMNS = "grid grid-cols-1 sm:[grid-template-columns:repeat(var(--n),minmax(0,1fr))]";
+export const optionColumns = (n: number) => ({ "--n": n }) as CSSProperties;
 
 const TONES = [
   "border-sky-500/40 bg-sky-500/10 text-sky-800 dark:text-sky-200",

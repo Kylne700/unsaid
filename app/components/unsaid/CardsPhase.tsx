@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 import type { DraftView, LedgerCardView } from "../../../server/domain/view";
-import { knownBy, OptionTag, PolarityMark, SectionTitle, selectClass, Tag } from "./bits";
+import { knownBy, OPTION_COLUMNS, optionColumns, OptionTag, PolarityMark, SectionTitle, selectClass, Tag } from "./bits";
 import { useRoomCtx } from "./room-context";
 
 type Polarity = "pro" | "con";
@@ -312,7 +312,7 @@ export function CardsPhase() {
           {othersCount === 0 ? "The others have not approved any cards yet." : `${othersCount} card${othersCount === 1 ? "" : "s"} approved by the others so far.`}
         </p>
         {ledger.length === 0 ? <p className="text-sm text-muted-foreground">You have not approved any cards yet.</p> : null}
-        <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${room.options.length}, minmax(0, 1fr))` }}>
+        <div className={cn(OPTION_COLUMNS, "gap-4")} style={optionColumns(room.options.length)}>
           {room.options.map((o) => {
             const cards = [...ledger.filter((c) => c.option === o.id)].sort((a, b) => (a.polarity === b.polarity ? 0 : a.polarity === "pro" ? -1 : 1));
             return (

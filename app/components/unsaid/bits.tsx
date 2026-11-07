@@ -9,12 +9,8 @@ export type OptionLite = { id: string; name: string };
 export const OPTION_COLUMNS = "grid grid-cols-1 sm:[grid-template-columns:repeat(var(--n),minmax(0,1fr))]";
 export const optionColumns = (n: number) => ({ "--n": n }) as CSSProperties;
 
-const TONES = [
-  "border-sky-500/40 bg-sky-500/10 text-sky-800 dark:text-sky-200",
-  "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200",
-  "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200",
-  "border-violet-500/40 bg-violet-500/10 text-violet-800 dark:text-violet-200",
-];
+// One neutral tag for every option: its name is in the tag, and amber, emerald and rose are kept for "only one knew", Pro and Con.
+const OPTION_TAG = "border-border bg-muted text-foreground";
 
 export const nameOfOption = (options: OptionLite[], id: string | null | undefined) => options.find((o) => o.id === id)?.name ?? "?";
 
@@ -29,8 +25,7 @@ export function Tag({ children, className }: { children: ReactNode; className?: 
 }
 
 export function OptionTag({ options, id }: { options: OptionLite[]; id: string }) {
-  const i = Math.max(0, options.findIndex((o) => o.id === id));
-  return <Tag className={TONES[i % TONES.length]}>{nameOfOption(options, id)}</Tag>;
+  return <Tag className={OPTION_TAG}>{nameOfOption(options, id)}</Tag>;
 }
 
 export function PolarityMark({ polarity }: { polarity: "pro" | "con" }) {

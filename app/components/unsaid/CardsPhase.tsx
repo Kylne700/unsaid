@@ -1,3 +1,4 @@
+import { IconCheck } from "@tabler/icons-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -12,11 +13,17 @@ import { useRoomCtx } from "./room-context";
 type Polarity = "pro" | "con";
 const truncate = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}...` : s);
 
+const POLARITY_ON = {
+  pro: "border-emerald-700 bg-emerald-500/10 text-emerald-800 hover:bg-emerald-500/15 hover:text-emerald-800 dark:border-emerald-400 dark:text-emerald-300 dark:hover:text-emerald-300",
+  con: "border-rose-700 bg-rose-500/10 text-rose-700 hover:bg-rose-500/15 hover:text-rose-700 dark:border-rose-400 dark:text-rose-300 dark:hover:text-rose-300",
+};
+
 function PolarityPick({ value, onPick }: { value: Polarity | null; onPick: (p: Polarity) => void }) {
   return (
     <div role="group" aria-label="Pro or con" className="flex gap-1">
       {(["pro", "con"] as const).map((p) => (
-        <Button key={p} type="button" size="sm" variant={value === p ? "default" : "outline"} aria-pressed={value === p} onClick={() => onPick(p)}>
+        <Button key={p} type="button" size="sm" variant="outline" aria-pressed={value === p} className={cn(value === p && POLARITY_ON[p])} onClick={() => onPick(p)}>
+          {value === p ? <IconCheck size={14} stroke={2.5} aria-hidden /> : null}
           {p === "pro" ? "Pro" : "Con"}
         </Button>
       ))}
@@ -111,7 +118,7 @@ function DraftRow({ d }: { d: DraftView }) {
           <Button variant="ghost" size="sm" onClick={() => void run("delete-draft", { draftId: d.id })}>
             Delete
           </Button>
-          <Button size="sm" disabled={!ready || working} onClick={() => void approve()}>
+          <Button size="sm" variant="secondary" disabled={!ready || working} onClick={() => void approve()}>
             Approve to ledger
           </Button>
         </div>
@@ -277,7 +284,7 @@ export function CardsPhase() {
                 {extractNote}
               </span>
             ) : null}
-            <Button variant="outline" size="sm" onClick={() => void extract()} disabled={drafting} aria-busy={drafting}>
+            <Button variant={drafts.length === 0 && ledger.length === 0 ? "default" : "outline"} size="sm" onClick={() => void extract()} disabled={drafting} aria-busy={drafting}>
               {drafting ? "Drafting..." : "Draft cards from my notes"}
             </Button>
           </div>

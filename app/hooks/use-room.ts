@@ -1,7 +1,9 @@
 // Reads a room (polling every 2 s while the tab is visible, so another open window follows within about 2 s) and runs room actions.
 // Every call here is one of the framework actions in /actions: the chat agent calls the same ones.
-import { actionErrorMessage, callAction, useActionQuery } from "@agent-native/core/client/hooks";
+import { callAction, useActionQuery } from "@agent-native/core/client/hooks";
 import { useCallback, useState } from "react";
+
+import { friendlyError } from "@/lib/friendly-error";
 
 import type { GuestView, RoomView } from "../../server/domain/view";
 
@@ -41,7 +43,7 @@ export function useRoomActions(code: string, token: string, refresh: () => Promi
         await refresh();
         return { ok: true, data };
       } catch (e) {
-        const message = actionErrorMessage(e) ?? "That did not work. Try again.";
+        const message = friendlyError(e);
         setError(message);
         return { ok: false, error: message };
       } finally {

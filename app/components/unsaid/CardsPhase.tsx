@@ -252,10 +252,13 @@ export function CardsPhase() {
   const ledger = room.ledger ?? [];
   const othersCount = room.othersCardCount ?? 0;
   const [extractNote, setExtractNote] = useState<string | null>(null);
+  const [drafting, setDrafting] = useState(false);
 
   async function extract() {
     setExtractNote(null);
+    setDrafting(true);
     const r = await run<{ added: number; source: "gemini" | "splitter" }>("extract-cards");
+    setDrafting(false);
     if (!r.ok) return;
     const n = `${r.data.added} draft${r.data.added === 1 ? "" : "s"}`;
     setExtractNote(!r.data.added ? "No new facts found in your notes." : r.data.source === "gemini" ? `Gemini drafted ${n} from your notes.` : `Added ${n}, one per sentence (AI unavailable right now).`);
@@ -274,8 +277,8 @@ export function CardsPhase() {
                 {extractNote}
               </span>
             ) : null}
-            <Button variant="outline" size="sm" onClick={() => void extract()}>
-              Draft cards from my notes
+            <Button variant="outline" size="sm" onClick={() => void extract()} disabled={drafting} aria-busy={drafting}>
+              {drafting ? "Drafting..." : "Draft cards from my notes"}
             </Button>
           </div>
         </div>

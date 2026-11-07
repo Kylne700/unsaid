@@ -47,8 +47,8 @@ function PracticeBanner({ room }: { room: RoomView }) {
   return (
     <p className={BANNER} data-testid="practice-banner" data-replay="true">
       <strong>Replay of a scripted team.</strong> Your two teammates are simulated.<span className="hidden sm:inline"> Want to do it with your own ratings?</span>{" "}
-      <button type="button" className="font-medium underline" onClick={() => void practice.go()} disabled={practice.pending} data-testid="replay-to-practice">
-        Do it yourself (3 min)
+      <button type="button" className="font-medium underline" onClick={() => void practice.go()} disabled={practice.pending} aria-busy={practice.pending} data-testid="replay-to-practice">
+        {practice.pending ? "Opening..." : "Do it yourself (3 min)"}
       </button>
       {practice.error ? <span role="alert"> {practice.error}</span> : null}
     </p>

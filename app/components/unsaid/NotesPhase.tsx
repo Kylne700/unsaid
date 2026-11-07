@@ -9,6 +9,10 @@ import { useRoomCtx } from "./room-context";
 
 type SaveState = "saved" | "typing" | "saving";
 
+// The server refuses more than 8,000 characters (MAX_NOTES in server/domain/room.ts); the box stops there, and a counter shows from 7,000.
+const NOTES_MAX = 8000;
+const NOTES_WARN = 7000;
+
 export function NotesPhase() {
   const { room, run, beforeDone } = useRoomCtx();
   const [text, setText] = useState(room.notes ?? "");
@@ -67,9 +71,15 @@ export function NotesPhase() {
           className="min-h-72 leading-relaxed"
           placeholder="What do you know that bears on this decision? Prices, past incidents, promises, doubts. One sentence per fact works best."
           value={text}
+          maxLength={NOTES_MAX}
           onChange={(e) => onChange(e.target.value)}
           onBlur={() => void save()}
         />
+        {text.length > NOTES_WARN ? (
+          <p className="mt-1 text-xs text-muted-foreground" aria-live="polite" data-testid="notes-count">
+            {text.length.toLocaleString("en-US")} of {NOTES_MAX.toLocaleString("en-US")} characters.{text.length >= NOTES_MAX ? " That is the limit: anything past it is not kept." : ""}
+          </p>
+        ) : null}
         <p className="mt-1.5 text-xs text-muted-foreground" aria-live="polite" data-testid="notes-state">
           {state === "saved" ? "Saved." : state === "saving" ? "Saving..." : "Not saved yet."} Next you turn these notes into cards, one fact each.
         </p>

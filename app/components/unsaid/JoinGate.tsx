@@ -1,10 +1,11 @@
-import { actionErrorMessage, useActionMutation } from "@agent-native/core/client/hooks";
+import { useActionMutation } from "@agent-native/core/client/hooks";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { friendlyError } from "@/lib/friendly-error";
 import { saveToken } from "@/lib/room-token";
 
 import type { GuestView } from "../../../server/domain/view";
@@ -17,7 +18,8 @@ export function JoinGate({ view, onJoined }: { view: GuestView; onJoined: (token
   const join = useActionMutation("join-room");
   const startPractice = useActionMutation("create-practice-room");
   const [name, setName] = useState("");
-  const error = join.error ?? startPractice.error;
+  const joinError = join.error ? friendlyError(join.error, "join") : null;
+  const practiceError = startPractice.error ? friendlyError(startPractice.error) : null;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -60,17 +62,34 @@ export function JoinGate({ view, onJoined }: { view: GuestView; onJoined: (token
           <form className="mt-8 space-y-3" onSubmit={(e) => void submit(e)}>
             {view.tokenInvalid ? <p className="text-sm text-muted-foreground">This browser's saved seat is not in this room. Join again with a name.</p> : null}
             <Label htmlFor="join-name">Your name</Label>
-            <Input id="join-name" autoFocus maxLength={40} placeholder="e.g. Dana" value={name} onChange={(e) => setName(e.target.value)} />
-            <Button type="submit" disabled={!name.trim() || join.isPending}>
-              Join room
+            <Input
+              id="join-name"
+              autoFocus
+              maxLength={40}
+              placeholder="e.g. Dana"
+              value={name}
+              aria-invalid={joinError ? true : undefined}
+              aria-describedby={joinError ? "join-error" : undefined}
+              onChange={(e) => {
+                setName(e.target.value);
+                if (join.error) join.reset();
+              }}
+            />
+            {joinError ? (
+              <p id="join-error" role="alert" className={`text-sm ${errorText}`}>
+                {joinError}
+              </p>
+            ) : null}
+            <Button type="submit" disabled={!name.trim() || join.isPending} aria-busy={join.isPending}>
+              {join.isPending ? "Joining..." : "Join room"}
             </Button>
             <p className="text-xs text-muted-foreground">No account and no email. Your seat is saved in this browser only.</p>
           </form>
         ) : view.practice ? (
           <div className="mt-8 space-y-3">
             <p className="text-sm text-muted-foreground">Practice rooms belong to one person and cannot be joined. You can start your own.</p>
-            <Button onClick={() => void newPractice()} disabled={startPractice.isPending}>
-              Try the trap (3 min)
+            <Button onClick={() => void newPractice()} disabled={startPractice.isPending} aria-busy={startPractice.isPending}>
+              {startPractice.isPending ? "Opening..." : "Try the trap (3 min)"}
             </Button>
           </div>
         ) : (
@@ -78,9 +97,9 @@ export function JoinGate({ view, onJoined }: { view: GuestView; onJoined: (token
             This room has moved past the notes phase, so new people can no longer join. If you were in it, open this link in the browser you joined from.
           </p>
         )}
-        {error ? (
+        {practiceError ? (
           <p role="alert" className={`mt-3 text-sm ${errorText}`}>
-            {actionErrorMessage(error) ?? "That did not work. Try again."}
+            {practiceError}
           </p>
         ) : null}
       </div>

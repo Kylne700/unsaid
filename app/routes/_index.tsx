@@ -1,4 +1,4 @@
-import { actionErrorMessage, useActionMutation } from "@agent-native/core/client/hooks";
+import { useActionMutation } from "@agent-native/core/client/hooks";
 import { IconPlus, IconX } from "@tabler/icons-react";
 import { useState } from "react";
 import { useNavigate } from "react-router";
@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useStartRoom } from "@/hooks/use-start-room";
+import { friendlyError } from "@/lib/friendly-error";
 import { normalizeCodeInput, saveToken } from "@/lib/room-token";
 
 import { errorText } from "@/components/unsaid/bits";
@@ -133,7 +134,13 @@ function StartRoomCard() {
   const [options, setOptions] = useState(["", ""]);
   const [name, setName] = useState("");
   const filled = options.map((o) => o.trim()).filter(Boolean);
-  const valid = question.trim().length >= 3 && filled.length >= 2 && name.trim().length > 0;
+  // The same rules the server applies (domain/room.ts), so a click never ends in an error.
+  const optionHint = filled.some((o) => o.length < 2)
+    ? "Each option needs at least 2 characters."
+    : new Set(filled.map((o) => o.toLowerCase())).size < filled.length
+      ? "Each option needs a different name."
+      : null;
+  const valid = question.trim().length >= 3 && filled.length >= 2 && !optionHint && name.trim().length > 0;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -165,6 +172,8 @@ function StartRoomCard() {
               <div key={i} className="flex items-center gap-2">
                 <Input
                   aria-label={`Option ${i + 1}`}
+                  aria-describedby={optionHint ? "option-hint" : undefined}
+                  minLength={2}
                   maxLength={40}
                   placeholder={`Option ${i + 1}`}
                   value={o}
@@ -177,6 +186,11 @@ function StartRoomCard() {
                 ) : null}
               </div>
             ))}
+            {optionHint ? (
+              <p id="option-hint" className="text-sm text-muted-foreground">
+                {optionHint}
+              </p>
+            ) : null}
             {options.length < 4 ? (
               <Button type="button" variant="ghost" size="sm" onClick={() => setOptions((all) => [...all, ""])}>
                 <IconPlus size={16} aria-hidden /> Add an option
@@ -187,12 +201,12 @@ function StartRoomCard() {
             <Label htmlFor="n">Your name</Label>
             <Input id="n" maxLength={40} placeholder="e.g. Dana" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
-          <Button type="submit" variant="outline" disabled={!valid || make.isPending} data-testid="start-room">
-            Start a room
+          <Button type="submit" variant="outline" disabled={!valid || make.isPending} aria-busy={make.isPending} data-testid="start-room">
+            {make.isPending ? "Starting..." : "Start a room"}
           </Button>
           {make.error ? (
             <p role="alert" className={`text-sm ${errorText}`}>
-              {actionErrorMessage(make.error)}
+              {friendlyError(make.error)}
             </p>
           ) : null}
         </form>

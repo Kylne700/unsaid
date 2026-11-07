@@ -55,9 +55,30 @@ function PracticeBanner({ room }: { room: RoomView }) {
   );
 }
 
+/** True once another tab of this browser has the same room open. The seat is kept per browser, so that tab is the same person. */
+function useSecondTab(code: string) {
+  const [second, setSecond] = useState(false);
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined") return;
+    const me = Math.random().toString(36).slice(2);
+    const channel = new BroadcastChannel(`unsaid-room-${code}`);
+    channel.onmessage = (e: MessageEvent<{ from?: string; hello?: boolean }>) => {
+      if (!e.data?.from || e.data.from === me) return;
+      setSecond(true);
+      if (e.data.hello) channel.postMessage({ from: me });
+    };
+    channel.postMessage({ from: me, hello: true });
+    return () => channel.close();
+  }, [code]);
+  return second;
+}
+
 function InviteLink({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
+  const [asked, setAsked] = useState(false);
+  const second = useSecondTab(code);
   async function copy() {
+    setAsked(true);
     try {
       await navigator.clipboard.writeText(`${window.location.origin}/r/${code}`);
       setCopied(true);
@@ -67,10 +88,20 @@ function InviteLink({ code }: { code: string }) {
     }
   }
   return (
-    <Button variant="outline" size="sm" onClick={() => void copy()}>
-      {copied ? <IconCheck size={16} aria-hidden /> : <IconCopy size={16} aria-hidden />}
-      {copied ? "Link copied" : "Copy invite link"}
-    </Button>
+    <div className="flex flex-col items-start sm:items-end">
+      <Button variant="outline" size="sm" onClick={() => void copy()}>
+        {copied ? <IconCheck size={16} aria-hidden /> : <IconCopy size={16} aria-hidden />}
+        {copied ? "Link copied" : "Copy invite link"}
+      </Button>
+      {/* Shown only after the link was copied, or when this room is open in a second tab: that tab is the same person, not a new one. */}
+      <div role="status">
+        {asked || second ? (
+          <p className="mt-1.5 max-w-xs text-xs text-muted-foreground sm:text-right" data-testid="private-window-hint">
+            {second ? "This room is open in another tab, and that tab is you. " : ""}To try it alone, open the link in a private window.
+          </p>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

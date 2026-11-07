@@ -59,6 +59,16 @@ export function NotesPhase() {
     };
   }, [beforeDone, save]);
 
+  // The same person can have the room open in a second tab. While nothing typed here is unsaved, the box follows what the server holds,
+  // so a second tab never starts from an empty box and never saves over the first tab's notes.
+  useEffect(() => {
+    if (dirty.current) return;
+    const server = room.notes ?? "";
+    if (server === latest.current) return;
+    latest.current = server;
+    setText(server);
+  }, [room.notes]);
+
   function onChange(value: string) {
     setText(value);
     latest.current = value;

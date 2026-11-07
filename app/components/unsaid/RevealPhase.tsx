@@ -271,57 +271,11 @@ export function RevealPhase() {
   // The viewer's own column first, then the others in the room's order.
   const columns = [...rv.members].sort((a, b) => Number(b.id === v.id) - Number(a.id === v.id));
   const topShared = rv.sharedRanking.groups[0]?.options ?? [];
-  const inside = [alone && "alone check", guess && "guess who", rv.cards.length ? `all ${rv.cards.length} cards` : ""].filter(Boolean).join(", ");
+  const inside = ["scores by option", alone && "alone check", guess && "guess who", rv.cards.length ? `all ${rv.cards.length} cards` : ""].filter(Boolean).join(", ");
 
   return (
     <div className="space-y-10" data-testid="reveal">
       <ProofPanel rv={rv} />
-
-      <section aria-labelledby="scores-title">
-        <SectionTitle hint="One rule everywhere: a card counts +weight if it is a pro and -weight if it is a con, and its weight is the average of everyone's 0 to 3 rating.">
-          <span id="scores-title">Scores by option</span>
-        </SectionTitle>
-        <div className="overflow-x-auto rounded-lg border bg-card" tabIndex={0} role="region" aria-label="Scores">
-          <table className="w-full text-left text-sm" data-testid="scores-table">
-            <thead className="border-b bg-muted/50 text-xs text-muted-foreground">
-              <tr>
-                <th scope="col" className="px-4 py-3 font-medium">
-                  Option
-                </th>
-                <th scope="col" className="px-4 py-3 font-medium" data-testid="col-full">
-                  Full ledger
-                  <span className="block font-normal">all {rv.cards.length} cards</span>
-                </th>
-                {columns.map((m) => (
-                  <th key={m.id} scope="col" className="px-4 py-3 font-medium" data-testid={`col-own-${m.id}`}>
-                    <Who name={m.id === v.id ? "You" : m.name} simulated={m.simulated} className="text-foreground" /> alone
-                    <span className="block font-normal">
-                      own facts only, {m.cardCount} card{m.cardCount === 1 ? "" : "s"}
-                    </span>
-                  </th>
-                ))}
-                <th scope="col" className="px-4 py-3 font-medium">
-                  Final votes
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {rv.options.map((o) => (
-                <tr key={o.id} data-testid={`row-${o.id}`}>
-                  <th scope="row" className="px-4 py-3 text-left align-top font-medium">
-                    <OptionTag options={options} id={o.id} />
-                  </th>
-                  <Cell score={o.fullScore} ranking={rv.fullRanking} optionId={o.id} />
-                  {columns.map((m) => (
-                    <Cell key={m.id} score={m.ownScores[o.id] ?? 0} ranking={m.ownRanking} optionId={o.id} />
-                  ))}
-                  <td className="px-4 py-3 align-top text-lg tabular-nums">{o.votes}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
 
       <section aria-labelledby="picks-title">
         <SectionTitle hint="Sealed until now.">
@@ -392,48 +346,91 @@ export function RevealPhase() {
         </section>
       ) : null}
 
-      {inside ? (
-        <details className="rounded-lg border bg-card px-4 py-3 text-sm" data-testid="more-detail">
-          <summary className="cursor-pointer font-medium" data-testid="more-detail-summary">
-            More detail<span className="font-normal text-muted-foreground"> ({inside})</span>
-          </summary>
-          <div className="mt-4 space-y-8">
-            {alone ? <AloneCheck a={alone} /> : null}
-            {guess ? <GuessWho gw={guess} /> : null}
-            {rv.cards.length ? (
-              <section aria-labelledby="cards-title">
-                <SectionTitle>
-                  <span id="cards-title">All {rv.cards.length} cards with their team weights</span>
-                </SectionTitle>
-                <table className="w-full text-left text-sm">
-                  <thead className="text-xs text-muted-foreground">
-                    <tr>
-                      <th className="py-2 pr-3 font-medium">Option</th>
-                      <th className="py-2 pr-3 font-medium"> </th>
-                      <th className="py-2 pr-3 font-medium">Fact</th>
-                      <th className="py-2 pr-3 font-medium">Known by</th>
-                      <th className="py-2 font-medium">Team weight</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {rv.cards.map((c) => (
-                      <tr key={c.id}>
-                        <td className="py-2 pr-3 align-top">{nameOfOption(options, c.option)}</td>
-                        <td className="py-2 pr-3 align-top">{c.polarity === "pro" ? "Pro" : "Con"}</td>
-                        <td className="py-2 pr-3 align-top" dir="auto">{c.text}</td>
-                        <td className="py-2 pr-3 align-top">{c.holders.join(", ")}</td>
-                        <td className="py-2 align-top tabular-nums">
-                          {fmt(c.weight)} <span className="text-xs text-muted-foreground">({c.raters} rated)</span>
-                        </td>
-                      </tr>
+      <details className="rounded-lg border bg-card px-4 py-3 text-sm" data-testid="more-detail">
+        <summary className="cursor-pointer font-medium" data-testid="more-detail-summary">
+          More detail<span className="font-normal text-muted-foreground"> ({inside})</span>
+        </summary>
+        <div className="mt-4 space-y-8">
+          <section aria-labelledby="scores-title">
+            <SectionTitle hint="One rule everywhere: a card counts +weight if it is a pro and -weight if it is a con, and its weight is the average of everyone's 0 to 3 rating.">
+              <span id="scores-title">Scores by option</span>
+            </SectionTitle>
+            <div className="overflow-x-auto rounded-lg border bg-card" tabIndex={0} role="region" aria-label="Scores">
+              <table className="w-full text-left text-sm" data-testid="scores-table">
+                <thead className="border-b bg-muted/50 text-xs text-muted-foreground">
+                  <tr>
+                    <th scope="col" className="px-4 py-3 font-medium">
+                      Option
+                    </th>
+                    <th scope="col" className="px-4 py-3 font-medium" data-testid="col-full">
+                      Full ledger
+                      <span className="block font-normal">all {rv.cards.length} cards</span>
+                    </th>
+                    {columns.map((m) => (
+                      <th key={m.id} scope="col" className="px-4 py-3 font-medium" data-testid={`col-own-${m.id}`}>
+                        <Who name={m.id === v.id ? "You" : m.name} simulated={m.simulated} className="text-foreground" /> alone
+                        <span className="block font-normal">
+                          own facts only, {m.cardCount} card{m.cardCount === 1 ? "" : "s"}
+                        </span>
+                      </th>
                     ))}
-                  </tbody>
-                </table>
-              </section>
-            ) : null}
-          </div>
-        </details>
-      ) : null}
+                    <th scope="col" className="px-4 py-3 font-medium">
+                      Final votes
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {rv.options.map((o) => (
+                    <tr key={o.id} data-testid={`row-${o.id}`}>
+                      <th scope="row" className="px-4 py-3 text-left align-top font-medium">
+                        <OptionTag options={options} id={o.id} />
+                      </th>
+                      <Cell score={o.fullScore} ranking={rv.fullRanking} optionId={o.id} />
+                      {columns.map((m) => (
+                        <Cell key={m.id} score={m.ownScores[o.id] ?? 0} ranking={m.ownRanking} optionId={o.id} />
+                      ))}
+                      <td className="px-4 py-3 align-top text-lg tabular-nums">{o.votes}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+          {alone ? <AloneCheck a={alone} /> : null}
+          {guess ? <GuessWho gw={guess} /> : null}
+          {rv.cards.length ? (
+            <section aria-labelledby="cards-title">
+              <SectionTitle>
+                <span id="cards-title">All {rv.cards.length} cards with their team weights</span>
+              </SectionTitle>
+              <table className="w-full text-left text-sm">
+                <thead className="text-xs text-muted-foreground">
+                  <tr>
+                    <th className="py-2 pr-3 font-medium">Option</th>
+                    <th className="py-2 pr-3 font-medium"> </th>
+                    <th className="py-2 pr-3 font-medium">Fact</th>
+                    <th className="py-2 pr-3 font-medium">Known by</th>
+                    <th className="py-2 font-medium">Team weight</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {rv.cards.map((c) => (
+                    <tr key={c.id}>
+                      <td className="py-2 pr-3 align-top">{nameOfOption(options, c.option)}</td>
+                      <td className="py-2 pr-3 align-top">{c.polarity === "pro" ? "Pro" : "Con"}</td>
+                      <td className="py-2 pr-3 align-top" dir="auto">{c.text}</td>
+                      <td className="py-2 pr-3 align-top">{c.holders.join(", ")}</td>
+                      <td className="py-2 align-top tabular-nums">
+                        {fmt(c.weight)} <span className="text-xs text-muted-foreground">({c.raters} rated)</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          ) : null}
+        </div>
+      </details>
 
       <p className="border-t pt-4 text-center text-sm text-muted-foreground" data-testid="disclaimer">
         {rv.disclaimer}

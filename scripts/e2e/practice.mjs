@@ -235,10 +235,6 @@ try {
   check("reveal: headline compares the sealed lean with the full ledger", lean === "Brightpane Chat" && full === "Kelvane Desk", `lean=${lean}; full ledger points to=${full}`);
   const own = await page.getByTestId("headline-own").innerText();
   check("reveal: own facts alone point to the lean", /point to\s+Brightpane Chat/.test(own), own.replace(/\s+/g, " "));
-  const firstOf = (col) => page.locator(`[data-testid="scores-table"] tbody tr`).evaluateAll((rows, c) => rows.filter((r) => r.querySelectorAll("td")[c]?.getAttribute("data-first") === "true").map((r) => r.querySelector("th").innerText.trim()), col);
-  const fullFirst = await firstOf(0);
-  const ownFirst = await firstOf(1);
-  check("reveal: table ranks Kelvane first on the full ledger and Brightpane first on your own facts", fullFirst.join() === "Kelvane Desk" && ownFirst.join() === "Brightpane Chat", `full=${fullFirst}; own=${ownFirst}`);
   check("reveal: counter says 9", (await page.getByTestId("reveal-unique").innerText()) === "9");
   check("reveal: changed facts are listed with their holders", (await page.getByTestId("changed-card").count()) >= 1, `${await page.getByTestId("changed-card").count()} facts`);
   const disclaimer = await page.getByTestId("disclaimer").innerText();
@@ -246,9 +242,14 @@ try {
   check("reveal: practice shows neither the guess-who panel nor the alone check nor a room-wide number", (await page.getByTestId("guess-who").count()) === 0 && (await page.getByTestId("alone-check").count()) === 0 && (await page.getByTestId("guess-pct").count()) === 0);
   const more = page.getByTestId("more-detail");
   const moreSummary = norm(await page.getByTestId("more-detail-summary").innerText());
-  check("reveal: 'More detail' is closed and holds only the table of all 15 cards", (await more.evaluate((el) => !el.open)) && moreSummary === "More detail (all 15 cards)", moreSummary);
+  check("reveal: 'More detail' is closed and holds the scores table and the table of all 15 cards", (await more.evaluate((el) => !el.open)) && moreSummary === "More detail (scores by option, all 15 cards)", moreSummary);
   await page.getByTestId("more-detail-summary").click();
-  check("reveal: opening 'More detail' shows the 15 cards with their holders", (await more.locator("tbody tr").count()) === 15 && /Noa/.test(await more.innerText()));
+  // The scores table repeats what the proof grid shows at full size, so it sits in "More detail", above the cards.
+  const firstOf = (col) => more.locator(`[data-testid="scores-table"] tbody tr`).evaluateAll((rows, c) => rows.filter((r) => r.querySelectorAll("td")[c]?.getAttribute("data-first") === "true").map((r) => r.querySelector("th").innerText.trim()), col);
+  const fullFirst = await firstOf(0);
+  const ownFirst = await firstOf(1);
+  check("reveal: table ranks Kelvane first on the full ledger and Brightpane first on your own facts", fullFirst.join() === "Kelvane Desk" && ownFirst.join() === "Brightpane Chat", `full=${fullFirst}; own=${ownFirst}`);
+  check("reveal: opening 'More detail' shows the 15 cards with their holders", (await more.locator('section[aria-labelledby="cards-title"] tbody tr').count()) === 15 && /Noa/.test(await more.innerText()));
   await page.getByTestId("more-detail-summary").click();
   const revealRaw = JSON.parse(await rawRoom(page, code));
   check("reveal: the view carries your own picks and the full ledger", revealRaw.reveal.viewer.vote === "A" && revealRaw.reveal.viewer.initialPick === "B" && revealRaw.reveal.cards.length === 15 && revealRaw.reveal.uniqueCount === 9);

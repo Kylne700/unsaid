@@ -451,8 +451,6 @@ try {
     /Ana[\s\S]*Leaned to\s+Omega[\s\S]*voted\s+Zeta/.test(picksA) && /Ben[\s\S]*Leaned to\s+Zeta[\s\S]*voted\s+Omega/.test(picksA) && /Cleo[\s\S]*Leaned to\s+Omega[\s\S]*voted\s+Omega/.test(picksA),
     picksA.replace(/\s+/g, " "),
   );
-  const tableA = await A.getByTestId("scores-table").innerText();
-  check("reveal: the score table lists the full ledger and each person's own facts", /Full ledger/.test(tableA) && /(Ana|You)\s+alone/.test(tableA) && /Ben\s+alone/.test(tableA) && /Cleo\s+alone/.test(tableA));
   check("reveal: disclaimer in all windows", (await A.getByTestId("disclaimer").innerText()) === "Unsaid never votes or recommends. These are your team's facts and your team's weights." && (await B.getByTestId("disclaimer").count()) === 1 && (await C.getByTestId("disclaimer").count()) === 1);
 
   // The Zeta battery fact was merged in weigh, so it has two holders: 3 facts only one person knew (not 5), and the
@@ -476,11 +474,13 @@ try {
   // They sit in one closed "More detail" under the proof panel; Cleo gave no alone guess, so hers names one panel less.
   const mores = await Promise.all([A, B, C].map(async (pg) => ({ open: await pg.getByTestId("more-detail").evaluate((el) => el.open), label: norm(await pg.getByTestId("more-detail-summary").innerText()) })));
   check(
-    "reveal: 'More detail' is closed and names what is inside (alone check for Ana and Ben, guess who for all, every card)",
-    mores.every((m) => !m.open) && /^More detail \(alone check, guess who, all \d+ cards\)$/.test(mores[0].label) && mores[1].label === mores[0].label && /^More detail \(guess who, all \d+ cards\)$/.test(mores[2].label),
+    "reveal: 'More detail' is closed and names what is inside (scores by option, alone check for Ana and Ben, guess who for all, every card)",
+    mores.every((m) => !m.open) && /^More detail \(scores by option, alone check, guess who, all \d+ cards\)$/.test(mores[0].label) && mores[1].label === mores[0].label && /^More detail \(scores by option, guess who, all \d+ cards\)$/.test(mores[2].label),
     mores.map((m) => m.label).join(" | "),
   );
   for (const pg of [A, B, C]) await pg.getByTestId("more-detail-summary").click();
+  const tableA = await A.getByTestId("more-detail").getByTestId("scores-table").innerText();
+  check("reveal: the score table (inside 'More detail') lists the full ledger and each person's own facts", /Full ledger/.test(tableA) && /(Ana|You)\s+alone/.test(tableA) && /Ben\s+alone/.test(tableA) && /Cleo\s+alone/.test(tableA));
   const shown = [];
   for (const pg of [A, B, C]) shown.push([norm(await pg.getByTestId("guess-pct").innerText()), norm(await pg.getByTestId("guess-detail").innerText()), norm(await pg.getByTestId("guess-meaning").innerText())]);
   check(

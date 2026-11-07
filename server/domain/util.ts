@@ -56,6 +56,12 @@ export function seededShuffle<T>(items: readonly T[], seed: string): T[] {
 }
 
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/**
+ * Where a name counts: a whole word, with an English article in front ("The Zeta plan" becomes "This option plan", not "The this option
+ * plan"), or up to three Hebrew one-letter prefixes (בזטא = "in Zeta", ובזטא = "and in Zeta"), and a plural behind ("Zetas", "Buses").
+ * A possessive needs nothing: the apostrophe already ends the word. Nothing else may follow, so "Yorkshire" is not "York".
+ * Group 1 is the name itself, group 2 the plural ending.
+ */
 function optionNameRegex(options: OptionDef[]): RegExp | null {
   const names = options
     .flatMap((o) => [o.name, ...o.aliases])
@@ -63,23 +69,24 @@ function optionNameRegex(options: OptionDef[]): RegExp | null {
     .filter(Boolean)
     .sort((a, b) => b.length - a.length);
   if (!names.length) return null;
-  return new RegExp(`(?<![\\p{L}\\p{N}])(?:${names.map(escapeRegex).join("|")})(?![\\p{L}\\p{N}])`, "giu");
+  return new RegExp(`(?<![\\p{L}\\p{N}])(?:(?:the|an?)\\s+)?[בהוכלמש]{0,3}(${names.map(escapeRegex).join("|")})(e?s)?(?![\\p{L}\\p{N}])`, "giu");
 }
 
 /**
  * The same fact with the option it is about called "this option" and any other option it names called
  * "another option" (so "Omega costs more than Zeta" stays readable). With no subject, the first option named is the subject.
- * shortcut: capitalises only at the start of the text or after . ! ? , not after a quote or bracket.
+ * The article or Hebrew prefix goes with the name, a plural becomes "these options" / "other options".
+ * shortcut: capitalises only at the start of the text or after . ! ? , not after a quote or bracket; the label stays English inside Hebrew text.
  */
 export function neutralize(text: string, options: OptionDef[], subject?: string | null): string {
   const re = optionNameRegex(options);
   if (!re) return text;
   const idOf = new Map(options.flatMap((o) => [o.name, ...o.aliases].map((n) => [n.trim().toLowerCase(), o.id] as const)));
   let about: string | null | undefined = subject;
-  return text.replace(re, (name: string, at: number) => {
+  return text.replace(re, (_whole: string, name: string, plural: string | undefined, at: number) => {
     const id = idOf.get(name.toLowerCase());
     about ??= id;
-    const label = id === about ? "this option" : "another option";
+    const label = id === about ? (plural ? "these options" : "this option") : plural ? "other options" : "another option";
     return /(^|[.!?]\s+)$/.test(text.slice(0, at)) ? label.charAt(0).toUpperCase() + label.slice(1) : label;
   });
 }

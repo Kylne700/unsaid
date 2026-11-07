@@ -1,6 +1,6 @@
 // Model-backed extraction with the model mocked: the reply is untrusted, and every failure falls back to the splitter.
 import { describe, expect, it } from "vitest";
-import { extractCards, MAX_CARDS, NOTES_CAP, parseCards, type Complete } from "./extract-cards";
+import { extractCards, MAX_CARDS, NOTES_CAP, parseCards, splitNotes, type Complete } from "./extract-cards";
 import { mayNameOption } from "./util";
 
 const options = [
@@ -77,6 +77,15 @@ describe("extractCards", () => {
     const complete = replying('{"cards":[]}');
     expect(await extractCards("  \n ", options, complete)).toEqual({ cards: [], source: "splitter" });
     expect(complete.calls).toHaveLength(0);
+  });
+});
+
+describe("splitNotes finds the option in 'The X' and plural forms, and neutralizes them", () => {
+  it("assigns the option and keeps the name out of the neutral wording", () => {
+    expect(splitNotes("The Kelvane Desk had two outages. Brightpane Chats cost less.", options)).toEqual([
+      { text: "The Kelvane Desk had two outages.", option: "A", polarity: null, neutral: "This option had two outages." },
+      { text: "Brightpane Chats cost less.", option: "B", polarity: null, neutral: "These options cost less." },
+    ]);
   });
 });
 

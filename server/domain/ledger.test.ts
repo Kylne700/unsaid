@@ -208,4 +208,49 @@ describe("neutralize", () => {
     expect(optionsNamed("YRK is cheap", opts)).toEqual(["B"]);
     expect(optionsNamed("nothing here", opts)).toEqual([]);
   });
+
+  describe("the forms a name takes in a sentence", () => {
+    const zo = [
+      { id: "A", name: "Zeta", aliases: [] },
+      { id: "B", name: "Omega", aliases: [] },
+    ];
+    const he = [
+      { id: "A", name: "זטא", aliases: [] },
+      { id: "B", name: "אומגה", aliases: [] },
+    ];
+    it("takes the article in front along: no 'The this option'", () => {
+      expect(neutralize("The Zeta plan costs more than the Omega plan.", zo)).toBe("This option plan costs more than another option plan.");
+      expect(neutralize("We chose an Omega, not a Zeta.", zo, "B")).toBe("We chose this option, not another option.");
+      expect(neutralize("THE ZETA is cheaper. Is the Omega?", zo, "A")).toBe("This option is cheaper. Is another option?");
+    });
+    it("takes only a whole-word article, and leaves one that has no name behind it", () => {
+      expect(neutralize("Extra Zeta, bathe Omega, and the plan.", zo)).toBe("Extra this option, bathe another option, and the plan.");
+    });
+    it("takes a plural ending along and says 'these options' / 'other options'", () => {
+      expect(neutralize("Zetas are cheaper than Omegas.", zo)).toBe("These options are cheaper than other options.");
+      expect(neutralize("The Zetas are cheap.", zo, "A")).toBe("These options are cheap.");
+      expect(neutralize("Buses are late.", [{ id: "A", name: "Bus", aliases: [] }])).toBe("These options are late.");
+    });
+    it("keeps the possessive ending after the label, straight or curly apostrophe", () => {
+      expect(neutralize("Zeta's support, Zetas' support and Zeta\u2019s docs.", zo, "A")).toBe("This option's support, these options' support and this option\u2019s docs.");
+    });
+    it("does not touch a longer word that merely starts with a name", () => {
+      expect(neutralize("Zetasoft and Zetaplan sell Zeta.", zo)).toBe("Zetasoft and Zetaplan sell this option.");
+      expect(neutralize("Github and Gist use Git.", [{ id: "A", name: "Git", aliases: [] }])).toBe("Github and Gist use this option.");
+    });
+    it("takes up to three Hebrew one-letter prefixes with the name", () => {
+      expect(neutralize("בזטא יש תמיכה, הזטא זולה מאומגה, ולאומגה אין מחיר.", he)).toBe(
+        "This option יש תמיכה, this option זולה another option, another option אין מחיר.",
+      );
+      expect(neutralize("ושבזטא", he)).toBe("This option");
+    });
+    it("leaves a Hebrew word with a letter in front that is not a prefix, or a letter behind the name", () => {
+      expect(neutralize("אזטא וזטאי", he)).toBe("אזטא וזטאי");
+    });
+    it("optionsNamed sees the same forms", () => {
+      expect(optionsNamed("The Zetas are cheap", zo)).toEqual(["A"]);
+      expect(optionsNamed("בזטא יש תמיכה", he)).toEqual(["A"]);
+      expect(optionsNamed("Yorkshire", opts)).toEqual([]);
+    });
+  });
 });

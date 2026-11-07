@@ -10,7 +10,7 @@ Made for the Builder.io Agent-Native hackathon.
 
 ## What Unsaid is, and why
 
-Teams tend to talk about what everyone already knows. In a classic experiment, 83% of 18 groups picked the best candidate when every member had all the facts, but 18% of 38 groups did when the facts were split between members (Stasser & Titus, 1985, Journal of Personality and Social Psychology 48(6)). A meta-analysis of 65 studies found split-fact groups about 8 times less likely to find the best option (Lu, Yuan & McLeod, 2012, [PubMed 21896790](https://pubmed.ncbi.nlm.nih.gov/21896790/)). The effect is called the hidden profile.
+Teams tend to talk about what everyone already knows. In a classic experiment, 83% of 18 groups picked the best candidate when every member had all the facts, but 18% of 38 groups did when the facts were split between members (Stasser & Titus, 1985, Journal of Personality and Social Psychology 48(6), [doi:10.1037/0022-3514.48.6.1467](https://doi.org/10.1037/0022-3514.48.6.1467)). A meta-analysis of 65 studies found split-fact groups about 8 times less likely to find the best option (Lu, Yuan & McLeod, 2012, [PubMed 21896790](https://pubmed.ncbi.nlm.nih.gov/21896790/)). The effect is called the hidden profile. A pre-registered 2025 experiment from Microsoft Research (Alsobay, Rothschild, Hofman & Goldstein, [arXiv 2508.08242](https://arxiv.org/abs/2508.08242), 1,475 people in 281 groups) tried to fix it with a GPT-4o facilitator, a human facilitator or a one-time message: the AI facilitator got more information said in the discussion, but no kind of facilitation significantly changed the final decision. So Unsaid changes how the decision is made (private notes, blind ratings, sealed votes) and has no facilitator that talks for the group.
 
 Unsaid tries to give a fact that one person holds a way onto the table. People write what they know, the facts become cards, the room rates every card without option names or authors, and the reveal shows which facts one person held and whether they moved the ranking. The research describes the problem. We have not tested whether Unsaid helps real teams.
 
@@ -23,14 +23,35 @@ One person starts a room with a question and two or more options and shares the 
 1. **Notes.** You write what you know. The other members do not see your notes. You can seal which option you lean to; the others do not see it until the reveal.
 2. **Cards.** "Draft cards from my notes" turns your notes into draft cards: one fact about one option, as a pro or a con. You edit them and approve the ones you want into the shared ledger. In this phase you see your own approved cards in full and a count of the cards the others have approved. The full ledger opens when the room moves on to weigh. If two of your own cards state the same fact, you can merge them, and split them again.
 3. **Weigh.** Everyone rates every fact from 0 to 3, in their own shuffled order, with no option name, no author and no running totals. A card's weight is the mean of everyone's ratings. A pro adds its weight to its option and a con takes it away. A tie is shown as a tie. This is also where duplicates between members get merged: the cards are all on your screen now, so if a card states a fact one of yours already states, press "Same as mine" on it and pick your card. Your card is folded into that one, you count as someone who knew the fact, and the ratings already given to your card move across (unless that member rated the other card too, then the other card's rating stays). Only your own card can be folded away, and nobody is shown who merged.
-4. **Vote.** One sealed vote each. You can also say how many of the others you expect to pick what you pick (the alone check) and, in a room of three or more, guess who knew a fact that exactly one other person knew (guess who).
-5. **Reveal.** Who held each fact, each person's lean and each vote open up. The room sees the ranking from all facts next to the ranking from the facts that two or more people held, and which single-holder facts moved it.
+4. **Vote.** One sealed vote each. In a live room a closed box, "Optional: two quick guesses", lets you also say how many of the others you expect to pick what you pick (the alone check) and, in a room of three or more, guess who knew a fact that exactly one other person knew (guess who). Practice and replay rooms leave both out.
+5. **Reveal.** Who held each fact, each person's lean and each vote open up. The room sees the ranking from all facts next to the ranking from the facts that two or more people held, and which single-holder facts moved it. The reveal opens with one proof panel: the headline (your sealed lean against what the full ledger points to) and four rows: each person alone, only the facts that two or more people held, every fact, and the final votes. Every number is a field of the room's data. The alone check, guess who and the all-cards table sit under one closed "More detail".
 
-To try it without a team, "Try the trap" opens a practice room: a made-up vendor decision, you, and two scripted teammates that are labelled as simulated.
+To try it without a team, "See the trap in 20 seconds" on the home page opens a replay of a scripted team: a made-up vendor decision, a scripted you and two simulated teammates, straight at the reveal, with no typing and no AI call. Alone, all three lean to Brightpane Chat; with all 15 facts on the table the ledger points to Kelvane Desk (10.33 against 0.00). It is a scripted example, not a measurement of a real team. "Do it yourself (3 min)" opens the practice room: the same made-up decision, where you write notes and rate the facts yourself, with the two simulated teammates.
 
 What a phase hides is removed on the server before it answers (`viewRoom` in `server/domain/view.ts`). The screen and the room assistant get the same answer, and the assistant's copy has the guess data taken out.
 
 ![The reveal](docs/shots/07-reveal-full.png)
+
+## How Unsaid uses Agent-Native
+
+Where each Agent-Native feature is used (file:line as of the commit that wrote this) and what we left out on purpose.
+
+| Feature | Where in Unsaid |
+|---|---|
+| Actions are the one API for the screen and the agent | 21 actions in `actions/` (19 room actions plus `navigate` and `view-screen`). The screen calls them through `useActionQuery` and `callAction` (`app/hooks/use-room.ts:16,40`). The room assistant gets 12 of them as tools (`server/plugins/agent-chat.ts:10-23`). |
+| Agent chat | `AgentSidebar` and `AgentToggleButton` (`app/components/unsaid/RoomScreen.tsx:104,121`), a custom prompt (`agent-chat.ts:38,65`), `frameworkTools: "minimal"` and code execution off in production (`agent-chat.ts:62-63`). The suggested questions change with the phase (`RoomScreen.tsx:23-29,115`). |
+| Context awareness | `view-screen` and `navigate` (`actions/`), `useNavigationState` (`app/root.tsx:98`), and `get-room`, which returns the room as the assistant's own seat may see it. |
+| Guests chat too, tied to their seat | `anonymousOwner: ownerFromSeatCookie` (`agent-chat.ts:69`), `registerAuthPublicPaths` (`agent-chat.ts:29`), and `ctx.caller === "tool"` to tell the assistant from the screen (`server/lib/room-api.ts:33,85`). |
+| Planned non-parity: the assistant helps, you decide | Nine actions have `agentTool: false`: four only mint a seat token, and five are your own judgments (your lean, a rating, a vote, a guess, approving a card). Those five also refuse any caller but your screen (`requireOwnJudgment`, `room-api.ts:53-58`, called in `actions/approve-draft.ts:12` and the other four), and tests call them as the assistant and expect the refusal (`server/lib/actions.test.ts:63-134`). One function, `viewRoom`, redacts every answer; it drops guesses for the assistant (`server/domain/view.ts:136-139`). |
+| Real-time sync | `useDbSync` (`app/root.tsx:99`) plus a 2 second read of the room (`app/hooks/use-room.ts:12`). |
+| Model access | The MCP approval page is on with an empty connector catalog (`agent-chat.ts:58`). Gemini is reached through one quota-guarded engine (`server/lib/gemini.ts:30-33,93`). |
+
+Not used, on purpose:
+
+- **Sharing.** Rooms are private by code and token. A second way into sealed data would be a risk, not a feature.
+- **`needsApproval`.** The assistant has no tool that makes a judgment for you (see the row above), so there is nothing to approve, and a prompt per card would cost one round trip per card. The framework docs say to keep approvals rare.
+- **Sending work from the screen to the chat (`sendToAgentChat`).** "Draft cards from my notes" calls the same action the assistant calls and, when Gemini is unavailable or over its daily cap, falls back to a sentence splitter with a visible note (`app/components/unsaid/CardsPhase.tsx:258-261`). Moving it into the chat would lose that fallback and double the Gemini calls per click. The bundled `delegate-to-agent` guide advises routing AI work through the chat and keeping actions free of model calls; `extract-cards` does call the model (`actions/extract-cards.ts:20`), a choice we made for the reason above.
+- **Generative UI, A2A and automations.** Nothing in the product needs them, and a background job would spend the free Gemini quota.
 
 ## Run it locally
 
@@ -77,12 +98,12 @@ The hackathon asks to name what was there before. Nothing in this repository pre
 - **Template.** The app started from the Agent-Native `chat` starter template (`@agent-native/core` 0.225.0, MIT, scaffolded with `create`). The untouched scaffold is the baseline commit `6aa14f7`, so `git diff 6aa14f7..HEAD` shows what we changed. It was committed on 6 November 2026.
 - **Libraries.** Agent-Native (`@agent-native/core`, `agentkit`, `toolkit`, `otel`), React, React Router, TanStack Query, Vite, Tailwind CSS, Radix UI, Tabler icons, Zod, Drizzle ORM, PGlite, the Vercel AI SDK with its Google provider (the Gemini connection) and Vitest.
 - **Assets and docs.** The icons, logos and favicon in `public/`, the Inter font (`@fontsource-variable/inter`) and the template's own guides (`AGENTS.md`, `DEVELOPING.md`, `DESIGN.md`, `.agents/skills`) are from the template or its packages, unchanged.
-- **Template files we changed (8).** `app/root.tsx` and `server/plugins/auth.ts` (Unsaid's pages are public, the template's own routes stay behind sign-in), `app/routes/_index.tsx` (the home page), `server/plugins/agent-chat.ts` (the room assistant's prompt, its 13-tool list and the Gemini engine), `server/plugins/agent-native-email-branding.ts` (app name, engine choice), `actions/navigate.ts` (keeps navigation inside the app), and `agent-native.config.ts` and `agent-native.json` (one setting each). We deleted the template's example action `actions/hello.ts` and `actions/provider-api-request.ts`, and replaced this README.
+- **Template files we changed (8).** `app/root.tsx` and `server/plugins/auth.ts` (Unsaid's pages are public, the template's own routes stay behind sign-in), `app/routes/_index.tsx` (the home page), `server/plugins/agent-chat.ts` (the room assistant's prompt, its 12-tool list and the Gemini engine), `server/plugins/agent-native-email-branding.ts` (app name, engine choice), `actions/navigate.ts` (keeps navigation inside the app), and `agent-native.config.ts` and `agent-native.json` (one setting each). We deleted the template's example action `actions/hello.ts` and `actions/provider-api-request.ts`, and replaced this README.
 - **What we wrote.**
-  - `server/domain/`: the room rules (phases, cards, ledger maths, guess meter, practice room) as plain functions over one JSON document, with unit tests.
+  - `server/domain/`: the room rules (phases, cards, ledger maths, guess meter, practice and replay rooms) as plain functions over one JSON document, with unit tests.
   - `server/db/`: storage for rooms and the daily AI counters.
   - `server/lib/`: the Gemini connection and its guards (the one place that reads the key, daily caps, tied to a room seat), guest seats and request helpers.
-  - `actions/`: the 18 room actions. The screen and the room assistant call the same ones.
+  - `actions/`: the 19 room actions. The screen and the room assistant call the same ones.
   - `app/`: the home page, the room screen with its five phase screens (`app/components/unsaid`, `app/routes/r.$code.tsx`) and the polling hook.
   - `server/scenarios/vendor.json`: the practice scenario, a made-up vendor decision written for this project.
   - `scripts/e2e/` and `docs/shots/`: the browser checks and the screenshots they take.
@@ -90,7 +111,7 @@ The hackathon asks to name what was there before. Nothing in this repository pre
 ## AI disclosure
 
 - **How it was built.** Built with AI coding assistance: Claude (from Anthropic), working in Claude Code, wrote and edited much of the code, the tests and this README. It was directed by Kylne700. Commits made with Claude carry a `Co-Authored-By` line.
-- **In the app.** The AI in a room is Google Gemini (`gemini-3.5-flash-lite`). It drafts cards from your notes and answers questions about your room in the chat. It acts as the member who is talking to it and sees what that member sees, with the guess data taken out. It has no action to vote, rate a card, guess who or set your lean, and its instructions forbid it to recommend an option or rank the options. You approve every card yourself.
+- **In the app.** The AI in a room is Google Gemini (`gemini-3.5-flash-lite`). It drafts cards from your notes and answers questions about your room in the chat. It acts as the member who is talking to it and sees what that member sees, with the guess data taken out. It has no action to approve a card, vote, rate a card, guess who or set your lean (those actions also refuse any caller but your own screen), and its instructions forbid it to recommend an option or rank the options. You approve every card yourself.
 
 ## Data note
 

@@ -30,12 +30,14 @@ const arg = (name, fallback) => process.argv.find((a) => a.startsWith(`--${name}
 export const BASE = arg("base", "http://127.0.0.1:18744");
 const PW_CORE = arg("pw-core", "playwright-core");
 
-export async function newPlayer(label, { width = 1280, height = 860 } = {}) {
+// `context` takes any other Playwright context option, for example timezoneId or extraHTTPHeaders.
+export async function newPlayer(label, { width = 1280, height = 860, ...context } = {}) {
   const { chromium } = await import(PW_CORE);
   const profile = mkdtempSync(path.join(tmpdir(), `unsaid-e2e-${label}-`));
   const ctx = await chromium.launchPersistentContext(profile, {
     headless: true,
     viewport: { width, height },
+    ...context,
   });
   const problems = [];
   const blocked = [];

@@ -87,7 +87,10 @@ The browser checks drive a headless Chromium against a running dev server (`http
 ```bash
 node scripts/e2e/practice.mjs --pw-core=<path to playwright-core/index.mjs>
 node scripts/e2e/live.mjs --pw-core=<path to playwright-core/index.mjs>
+node scripts/e2e/prod-quirks.mjs --pw-core=<path to playwright-core/index.mjs>
 ```
+
+`prod-quirks.mjs` replays two things only a hosted site shows: the line Netlify's free plan adds to `<head>` (React error #418) and the EU cookie banner (time zone Europe/Nicosia, and a country header).
 
 `scripts/e2e/agent.mjs` runs the room chat against the real Gemini API (about 15 requests per run). The browser checks rewrite the screenshots in `docs/shots`.
 

@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 
+import { proofGrid, topOf } from "@/lib/proof-grid";
 import { cn } from "@/lib/utils";
 
 import type { GuessWhoView, RevealView } from "../../../server/domain/view";
@@ -108,66 +109,71 @@ function AloneCheck({ a }: { a: NonNullable<RevealView["aloneCheck"]> }) {
   );
 }
 
-function ProofRow({ id, label, note, children }: { id: string; label: string; note?: string | undefined; children: ReactNode }) {
+/** A score for the eye (real minus sign, hidden from screen readers) and a plain twin with the test id (screen readers, copy and the checks read "-2.33"). */
+function Num({ text, id }: { text: string; id?: string | undefined }) {
   return (
-    <li className="px-3 py-1.5 sm:py-2" data-testid={`proof-row-${id}`}>
-      <p className="text-sm font-medium leading-5">
-        {label}
-        {note ? <span className="ml-2 hidden text-xs font-normal text-muted-foreground sm:inline">{note}</span> : null}
-      </p>
-      <div className="mt-0.5 flex flex-wrap items-baseline gap-x-3 text-sm leading-5">{children}</div>
-    </li>
+    <>
+      <span aria-hidden>{text.replace("-", "−")}</span>
+      <span className="sr-only" data-testid={id}>
+        {text}
+      </span>
+    </>
   );
 }
 
-/** The headline and the four rows that prove it: each person alone, the shared facts only, the full ledger, the votes. Every number is a field of the reveal view. */
+type GridCell = { key: string; on: boolean; node: ReactNode };
+
+/** One way of counting, as a row of the grid: a label, one cell per option. The cells that point (`on`) are bold on a light tint. */
+function ProofRow({ id, label, note, cells }: { id: string; label: string; note?: string | undefined; cells: GridCell[] }) {
+  return (
+    <tr className="border-t" data-testid={`proof-row-${id}`}>
+      <th scope="row" className="px-1.5 py-1.5 text-left align-top text-sm font-medium leading-5 [overflow-wrap:anywhere] sm:px-3 sm:py-2">
+        {label}
+        {note ? <span className="block text-xs font-normal text-muted-foreground">{note}</span> : null}
+      </th>
+      {cells.map((c) => (
+        <td
+          key={c.key}
+          data-pointed={c.on}
+          className={cn("px-1 py-1.5 text-right align-top text-base leading-5 tabular-nums sm:px-3 sm:py-2 sm:text-lg", c.on ? "bg-foreground/5 font-semibold text-foreground" : "text-muted-foreground")}
+        >
+          {c.node}
+          {c.on ? <span className="sr-only">, points here</span> : null}
+        </td>
+      ))}
+    </tr>
+  );
+}
+
+/** The headline and the grid that proves it: one column per option, four ways of counting, the pointed cell of each row tinted. The tint jumps from column to column when the claim flips. Every number is a field of the reveal view. */
 function ProofPanel({ rv }: { rv: RevealView }) {
   const { room } = useRoomCtx();
   const options = room.options;
   const names = (ids: string[]) => listNames(ids.map((id) => nameOfOption(options, id)));
   const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
-  const topOf = (r: Ranking) => r.groups[0]?.options ?? [];
-  const pointsTo = (ids: string[]) => (
-    <>
-      <span className="text-muted-foreground">{ids.length > 1 ? "Tied between" : "Points to"}</span> <strong>{names(ids)}</strong>
-    </>
-  );
   const v = rv.viewer;
   const n = rv.members.length;
   const replay = room.practice?.replay === true;
   const everyoneLeaned = replay && v.initialPick !== null && rv.members.every((m) => m.initialPick === v.initialPick);
-  // The viewer's own column first, then the others in the room's order; people with the same answer share one line.
-  const columns = [...rv.members].sort((a, b) => Number(b.id === v.id) - Number(a.id === v.id));
-  const lines: { top: string[]; people: typeof columns }[] = [];
-  for (const m of columns) {
-    const top = m.cardCount ? topOf(m.ownRanking) : [];
-    const line = lines.find((l) => sameSet(l.top, top));
-    if (line) line.people.push(m);
-    else lines.push({ top, people: [m] });
-  }
+  // The viewer first, then the others in the room's order.
+  const people = [...rv.members].sort((a, b) => Number(b.id === v.id) - Number(a.id === v.id));
+  const aloneTop = (m: (typeof people)[number]) => (m.cardCount ? topOf(m.ownRanking) : []);
   const sharedCards = rv.cards.filter((c) => c.holders.length >= 2);
   const everyoneKnew = sharedCards.every((c) => c.holders.length === n);
-  const strip = (row: "shared" | "full", top: string[]) => (
-    <span className="tabular-nums text-muted-foreground">
-      (
-      {rv.options.map((o, i) => (
-        <Fragment key={o.id}>
-          {i ? " · " : ""}
-          <span className={top.includes(o.id) ? "font-semibold text-foreground" : ""}>
-            {o.name} <span data-testid={`proof-${row}-${o.id}`}>{fixed(row === "shared" ? o.sharedScore : o.fullScore)}</span>
-          </span>
-        </Fragment>
-      ))}
-      )
-    </span>
-  );
+  const grid = proofGrid(rv);
+  const cells = (node: (o: RevealView["options"][number], i: number) => ReactNode, on: boolean[]): GridCell[] => rv.options.map((o, i) => ({ key: o.id, on: on[i] ?? false, node: node(o, i) }));
+  const aloneOf = (m: (typeof people)[number]) => {
+    const top = aloneTop(m);
+    const first = top[0];
+    return { score: first === undefined ? null : fixed(m.ownScores[first] ?? 0), tied: top.length > 1 };
+  };
 
   return (
     <section className="rounded-xl border bg-card p-3 sm:p-6" data-testid="reveal-headline">
       <h2 className="text-lg font-semibold leading-snug tracking-tight sm:text-3xl">
         {everyoneLeaned ? (
           <>
-            In this replay all {NUMBER_WORD[n] ?? n} (one scripted, two simulated) leaned to <span data-testid="headline-lean">{nameOfOption(options, v.initialPick)}</span>. With every fact on the table the ledger{" "}
+            Alone, all {NUMBER_WORD[n] ?? n} leaned to <span data-testid="headline-lean">{nameOfOption(options, v.initialPick)}</span>. The full ledger{" "}
           </>
         ) : (
           <>
@@ -181,57 +187,77 @@ function ProofPanel({ rv }: { rv: RevealView }) {
         )}
         {v.fullTied ? "is tied between" : "points to"} <span data-testid="headline-full">{names(v.fullTop)}</span>.
       </h2>
-      <ol className="mt-3 divide-y rounded-lg border bg-background sm:mt-4" data-testid="proof-panel">
-        <ProofRow id="alone" label="Each person alone" note="only the facts that person knew">
-          {lines.map((l) => (
-            <p key={l.top.join()} className="min-w-0">
-              {l.top.length ? pointsTo(l.top) : <strong>No cards</strong>}{" "}
-              <span className="tabular-nums text-muted-foreground">
-                (
-                {l.people.map((m, i) => (
-                  <Fragment key={m.id}>
-                    {i ? " · " : ""}
-                    <Who name={m.id === v.id ? "You" : m.name} simulated={m.simulated} className="align-baseline" />{" "}
-                    <span data-testid={`proof-alone-${m.id}`}>{l.top[0] ? fixed(m.ownScores[l.top[0]] ?? 0) : "-"}</span>
-                  </Fragment>
-                ))}
-                )
+      <div className="mt-3 overflow-hidden rounded-lg border bg-background sm:mt-4">
+        <table className="w-full table-fixed border-collapse" data-testid="proof-panel">
+          <caption className="sr-only">Four ways of counting the facts, and what each one points to</caption>
+          <colgroup>
+            <col className="w-[28%] sm:w-[34%]" />
+          </colgroup>
+          <thead>
+            <tr>
+              <td className="p-0">
+                <span className="sr-only">Way of counting</span>
+              </td>
+              {rv.options.map((o) => (
+                <th key={o.id} scope="col" className="px-1 py-1.5 text-right align-bottom text-xs font-medium leading-4 hyphens-auto [overflow-wrap:anywhere] sm:px-3 sm:py-2 sm:text-sm">
+                  {o.name}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <ProofRow id="alone" label="Each person alone" cells={cells((_o, i) => `${grid.lean[i] ?? 0} of ${n}`, grid.leanOn)} />
+            {rv.uniqueCount > 0 && sharedCards.length > 0 ? (
+              <ProofRow
+                id="shared"
+                label={`Only what ${everyoneKnew ? `all ${NUMBER_WORD[n] ?? n}` : "at least two"} knew`}
+                note={`(${sharedCards.length} of ${rv.cards.length} facts)`}
+                cells={cells((o) => <Num text={fixed(o.sharedScore)} id={`proof-shared-${o.id}`} />, grid.sharedOn)}
+              />
+            ) : null}
+            <ProofRow id="full" label={`All ${rv.cards.length} facts`} cells={cells((o) => <Num text={fixed(o.fullScore)} id={`proof-full-${o.id}`} />, grid.fullOn)} />
+            <ProofRow id="votes" label="Final votes" cells={cells((o) => <span data-testid={`proof-votes-${o.id}`}>{o.votes}</span>, grid.votesOn)} />
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+        Each person's own top score:{" "}
+        {people.map((m, i) => {
+          const a = aloneOf(m);
+          return (
+            <Fragment key={m.id}>
+              {i ? " · " : ""}
+              <span className="whitespace-nowrap">
+                <Who name={m.id === v.id ? "You" : m.name} simulated={m.simulated} className="align-baseline" />{" "}
+                <span className="tabular-nums">
+                  <span data-testid={`proof-alone-${m.id}`}>{a.score ?? "no cards"}</span>
+                  {a.tied ? " (tied)" : ""}
+                </span>
               </span>
-            </p>
+            </Fragment>
+          );
+        })}
+      </p>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground" data-testid="headline-vote">
+        {v.vote ? (
+          <>
+            You voted <strong className="font-semibold text-foreground">{nameOfOption(options, v.vote)}</strong>.
+          </>
+        ) : (
+          "You did not vote."
+        )}
+        <span className="sr-only">
+          {" "}
+          Final votes:{" "}
+          {rv.options.map((o, i) => (
+            <Fragment key={o.id}>
+              {i ? ", " : ""}
+              {o.name} {o.votes}
+            </Fragment>
           ))}
-        </ProofRow>
-        {rv.uniqueCount > 0 && sharedCards.length > 0 ? (
-          <ProofRow id="shared" label={`If the team had discussed only what ${everyoneKnew ? `all ${NUMBER_WORD[n] ?? n}` : "at least two of you"} already knew`} note={`${sharedCards.length} of ${rv.cards.length} facts`}>
-            <p>
-              {pointsTo(topOf(rv.sharedRanking))} {strip("shared", topOf(rv.sharedRanking))}
-            </p>
-          </ProofRow>
-        ) : null}
-        <ProofRow id="full" label="With every fact on the table" note={`all ${rv.cards.length} facts`}>
-          <p>
-            {pointsTo(topOf(rv.fullRanking))} {strip("full", topOf(rv.fullRanking))}
-          </p>
-        </ProofRow>
-        <ProofRow id="votes" label="Final votes">
-          <p data-testid="headline-vote">
-            {v.vote ? (
-              <>
-                You voted <strong>{nameOfOption(options, v.vote)}</strong>.{" "}
-              </>
-            ) : (
-              "You did not vote. "
-            )}
-            Final votes:{" "}
-            {rv.options.map((o, i) => (
-              <Fragment key={o.id}>
-                {i ? ", " : ""}
-                {o.name} <span data-testid={`proof-votes-${o.id}`}>{o.votes}</span>
-              </Fragment>
-            ))}
-            .
-          </p>
-        </ProofRow>
-      </ol>
+          .
+        </span>
+      </p>
       <p className="mt-3 text-sm text-muted-foreground" data-testid="headline-own">
         Your own facts alone {v.ownTied ? "are tied between" : "point to"} <strong className="text-foreground">{names(v.ownTop)}</strong>.{" "}
         {sameSet(v.ownTop, v.fullTop) ? "Your facts and the team's facts agree." : "Your facts and the team's facts disagree."}

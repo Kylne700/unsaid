@@ -281,7 +281,24 @@ try {
   const votes = await num(["votes-A", "votes-B", "votes-C"]);
   check("replay: final votes are Kelvane Desk 3, Brightpane Chat 0, Cobbleline Basic 0", votes["votes-A"] === "3" && votes["votes-B"] === "0" && votes["votes-C"] === "0", JSON.stringify(votes));
   const head = await text("reveal-headline");
-  check("replay: the headline is the whole claim in two sentences, merged into the proof panel", head.startsWith("In this replay all three (one scripted, two simulated) leaned to Brightpane Chat. With every fact on the table the ledger points to Kelvane Desk."), head.slice(0, 170));
+  check("replay: the headline is the whole claim in two sentences of 15 words, merged into the proof panel", head.startsWith("Alone, all three leaned to Brightpane Chat. The full ledger points to Kelvane Desk.") && head.split(/\.\s/)[0].split(" ").length + head.split(/\.\s/)[1].split(" ").length <= 15, head.slice(0, 170));
+  // The grid: one column per option (the chips' order), four rows; the tint (data-pointed) sits on one column per row and jumps when the claim flips.
+  const grid = await page.getByTestId("proof-panel").evaluate((t) => {
+    const flat = (el) => el.innerText.replace(/\s+/g, " ").trim();
+    const heads = [...t.querySelectorAll('thead th[scope="col"]')].map(flat);
+    const rows = {};
+    for (const tr of t.querySelectorAll("tbody tr")) {
+      const tds = [...tr.querySelectorAll("td")];
+      rows[tr.getAttribute("data-testid").replace("proof-row-", "")] = { label: flat(tr.querySelector("th")), cells: tds.map(flat), on: tds.flatMap((td, i) => (td.getAttribute("data-pointed") === "true" ? [heads[i]] : [])) };
+    }
+    return { heads, rows };
+  });
+  check("replay grid: one column per option in the chips' order, four rows", JSON.stringify(grid.heads) === JSON.stringify(["Kelvane Desk", "Brightpane Chat", "Cobbleline Basic"]) && Object.keys(grid.rows).join() === "alone,shared,full,votes", JSON.stringify(grid.heads) + Object.keys(grid.rows));
+  check("replay grid: row labels 'Each person alone', 'Only what all three knew (6 of 15 facts)', 'All 15 facts', 'Final votes'", grid.rows.alone?.label === "Each person alone" && grid.rows.shared?.label === "Only what all three knew (6 of 15 facts)" && grid.rows.full?.label === "All 15 facts" && grid.rows.votes?.label === "Final votes", JSON.stringify(Object.values(grid.rows).map((r) => r.label)));
+  check("replay grid: the tint is on Brightpane Chat in the first two rows and on Kelvane Desk in the last two", grid.rows.alone?.on.join() === "Brightpane Chat" && grid.rows.shared?.on.join() === "Brightpane Chat" && grid.rows.full?.on.join() === "Kelvane Desk" && grid.rows.votes?.on.join() === "Kelvane Desk", JSON.stringify(Object.values(grid.rows).map((r) => r.on)));
+  check("replay grid: the first row counts the people leaning there ('3 of 3' under Brightpane Chat, '0 of 3' elsewhere)", grid.rows.alone?.cells[1].startsWith("3 of 3") && grid.rows.alone.cells[0] === "0 of 3" && grid.rows.alone.cells[2] === "0 of 3", JSON.stringify(grid.rows.alone?.cells));
+  check("replay grid: scores show the real minus sign (U+2212) and keep a plain '-2.33' twin for readers", grid.rows.shared?.cells[0].startsWith("−2.33") && grid.rows.shared.cells[0].endsWith("-2.33") && grid.rows.full?.cells[2].startsWith("−1.67"), JSON.stringify([grid.rows.shared?.cells[0], grid.rows.full?.cells[2]]));
+  check("replay grid: the pointed cell is bold on a light tint, the others are plain", await page.getByTestId("proof-row-full").evaluate((tr) => { const [a, b] = tr.querySelectorAll("td"); const s = (td) => getComputedStyle(td); return Number(s(a).fontWeight) >= 600 && Number(s(b).fontWeight) < 600 && s(a).backgroundColor !== s(b).backgroundColor && s(a).fontVariantNumeric.includes("tabular-nums") && s(a).textAlign === "right"; }));
   check("replay: four proof rows, the headline on the same card, the scripted caption", (await page.locator('[data-testid^="proof-row-"]').count()) === 4 && (await page.getByTestId("reveal-headline").getByTestId("proof-panel").count()) === 1 && /^Scripted example, not a measurement of a real team/.test(await text("replay-caption")));
   check("replay: the team's own-facts line is there", /Your own facts alone point to Brightpane Chat\. Your facts and the team's facts disagree\./.test(await text("headline-own")));
   check("replay: no guess-who, alone check or guess question", (await page.getByTestId("guess-who").count()) === 0 && (await page.getByTestId("alone-check").count()) === 0 && (await page.getByTestId("guess-select").count()) === 0);
@@ -294,6 +311,13 @@ try {
     await page.waitForTimeout(300);
     const f = await fits('[data-testid^="proof-row-"]');
     check(`replay ${w}x${h}: all 4 proof rows are on the first screen without scrolling`, f.n === 4 && f.bottom !== null && f.bottom <= f.height, `last row bottom ${f.bottom} of ${f.height} (innerWidth ${f.width})`);
+    // No sideways scroll: neither the page, nor the layout's scroll container, nor anything inside the headline card sticks out to the right.
+    const side = await page.evaluate(() => {
+      const main = document.querySelector(".agent-sidebar-main-surface");
+      const out = [...document.querySelectorAll('[data-testid="reveal-headline"] *')].filter((el) => !el.closest(".sr-only") && el.getBoundingClientRect().right > window.innerWidth + 1).length;
+      return { doc: document.documentElement.scrollWidth - window.innerWidth, main: main ? main.scrollWidth - main.clientWidth : 0, out };
+    });
+    check(`replay ${w}x${h}: no sideways scroll, nothing in the headline card sticks out`, side.doc <= 0 && side.main <= 0 && side.out === 0, JSON.stringify(side));
   }
   await page.setViewportSize({ width: 1280, height: 800 });
   const callsAfter = modelCalls();

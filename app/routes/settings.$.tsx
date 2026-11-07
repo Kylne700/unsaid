@@ -1,1 +1,1 @@
-export { default, meta } from "./settings.js";
+export { loader } from "@/lib/redirect-home";

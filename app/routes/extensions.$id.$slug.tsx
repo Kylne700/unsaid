@@ -1,2 +1,1 @@
-export * from "./extensions.$id";
-export { default } from "./extensions.$id";
+export { loader } from "@/lib/redirect-home";

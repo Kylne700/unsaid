@@ -1,6 +1,6 @@
 import { useActionMutation } from "@agent-native/core/client/hooks";
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,7 +46,7 @@ export function JoinGate({ view, onJoined }: { view: GuestView; onJoined: (token
     <Shell right={<span className="font-mono tracking-widest">{view.code}</span>}>
       <div className="mx-auto max-w-lg">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{view.practice ? "Practice room" : "You are invited to a decision room"}</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight" data-testid="join-question">
+        <h1 className="mt-1 text-2xl font-semibold tracking-tight" data-testid="join-question" dir="auto">
           {view.question}
         </h1>
         <p className="mt-3 flex flex-wrap items-center gap-2">
@@ -93,9 +93,21 @@ export function JoinGate({ view, onJoined }: { view: GuestView; onJoined: (token
             </Button>
           </div>
         ) : (
-          <p className="mt-8 rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
-            This room has moved past the notes phase, so new people can no longer join. If you were in it, open this link in the browser you joined from.
-          </p>
+          <div className="mt-8 space-y-4">
+            <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+              This room has moved past the notes phase, so new people can no longer join. If you were in it, open this link in the browser you joined from.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild>
+                <Link to="/" data-testid="late-start-room">
+                  Start your own room
+                </Link>
+              </Button>
+              <Button variant="outline" onClick={() => void newPractice()} disabled={startPractice.isPending} aria-busy={startPractice.isPending} data-testid="late-practice">
+                {startPractice.isPending ? "Opening..." : "Try the practice room"}
+              </Button>
+            </div>
+          </div>
         )}
         {practiceError ? (
           <p role="alert" className={`mt-3 text-sm ${errorText}`}>

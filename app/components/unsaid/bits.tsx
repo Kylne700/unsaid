@@ -51,7 +51,7 @@ export function Who({ name, simulated, className }: { name: string; simulated?: 
   return (
     <span className={cn("inline-flex items-center gap-1.5", className)}>
       <span>{name}</span>
-      {simulated ? <span className="rounded bg-muted px-1 py-px text-[10px] font-medium uppercase tracking-wide text-muted-foreground">simulated</span> : null}
+      {simulated ? <span className="rounded bg-muted px-1 py-px text-xs font-medium uppercase tracking-wide text-muted-foreground">simulated</span> : null}
     </span>
   );
 }
@@ -60,12 +60,12 @@ export function SectionTitle({ children, hint }: { children: ReactNode; hint?: R
   return (
     <div className="mb-3">
       <h2 className="text-base font-semibold tracking-tight">{children}</h2>
-      {hint ? <p className="mt-0.5 text-sm text-muted-foreground">{hint}</p> : null}
+      {hint ? <p className="mt-0.5 max-w-prose text-sm text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }
 
 export const selectClass =
-  "h-9 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
+  "h-9 rounded-md border border-input bg-background px-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm";
 
 export const errorText = "text-red-700 dark:text-red-300";

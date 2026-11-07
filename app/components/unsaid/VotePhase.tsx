@@ -65,7 +65,7 @@ export function VotePhase() {
                     <li key={c.id} className="rounded-lg border bg-card p-3 text-sm" data-testid="vote-card" data-guessable={c.guessable}>
                       <div className="flex items-start gap-2">
                         <PolarityMark polarity={c.polarity} />
-                        <p className="flex-1 leading-snug">{c.text}</p>
+                        <p className="flex-1 leading-snug" dir="auto">{c.text}</p>
                       </div>
                       <p className="mt-2 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                         <span>
@@ -123,12 +123,12 @@ export function VotePhase() {
                     {guessables.map((c) => (
                       <li key={c.id} className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3" data-testid="guess-row">
                         <label htmlFor={`guess-${c.id}`} className="min-w-0 flex-1 leading-snug">
-                          <OptionTag options={room.options} id={c.option} /> {c.text}
+                          <OptionTag options={room.options} id={c.option} /> <span dir="auto">{c.text}</span>
                         </label>
                         <select
                           id={`guess-${c.id}`}
                           data-testid="guess-select"
-                          className={cn(selectClass, "h-8 w-full text-xs sm:w-44")}
+                          className={cn(selectClass, "h-8 w-full text-base sm:w-44 sm:text-xs")}
                           value={guess[c.id] ?? c.myGuess ?? ""}
                           onChange={(e) => void guessWho(c.id, e.target.value)}
                         >

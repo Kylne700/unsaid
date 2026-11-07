@@ -162,7 +162,7 @@ export function RoomScreen({ code, token, room, refresh, paused }: { code: strin
           <PracticeBanner room={room} />
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h1 className="text-lg font-semibold tracking-tight sm:text-2xl" data-testid="question">
+              <h1 className="text-lg font-semibold tracking-tight sm:text-2xl" data-testid="question" dir="auto">
                 {room.question}
               </h1>
               <p className="mt-2 flex flex-wrap items-center gap-2">
@@ -190,7 +190,7 @@ export function RoomScreen({ code, token, room, refresh, paused }: { code: strin
         {error ? (
           <div role="alert" className={`mt-4 flex items-start justify-between gap-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm ${errorText}`}>
             <span>{error}</span>
-            <button type="button" className="underline" onClick={clearError}>
+            <button type="button" className="px-2 py-1.5 underline" onClick={clearError}>
               Dismiss
             </button>
           </div>

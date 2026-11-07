@@ -1,10 +1,10 @@
 import { useActionMutation } from "@agent-native/core/client/hooks";
 import { IconPlus, IconX } from "@tabler/icons-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useStartRoom } from "@/hooks/use-start-room";
@@ -16,6 +16,11 @@ import { Shell } from "@/components/unsaid/Shell";
 
 export function meta() {
   return [{ title: "Unsaid: decide with what your team never said" }];
+}
+
+// The toolkit's CardTitle is an h3. These cards sit right under the h1, so they are h2s: heading levels must not skip.
+function CardHeading({ children }: { children: ReactNode }) {
+  return <h2 className="text-2xl font-semibold leading-none tracking-tight">{children}</h2>;
 }
 
 const STEPS = [
@@ -80,7 +85,7 @@ function TrapCard({ start }: { start: Started }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Fall into the trap yourself</CardTitle>
+        <CardHeading>Fall into the trap yourself</CardHeading>
         <CardDescription>
           A practice room with two simulated teammates. You will lean one way from your own notes, then see what the whole team's facts say. No sign-up.
         </CardDescription>
@@ -106,7 +111,7 @@ function JoinCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Join a room</CardTitle>
+        <CardHeading>Join a room</CardHeading>
         <CardDescription>Got a room code or an invite link? Enter the code, then pick a name.</CardDescription>
       </CardHeader>
       <CardContent>
@@ -157,14 +162,14 @@ function StartRoomCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Start a room</CardTitle>
+        <CardHeading>Start a room</CardHeading>
         <CardDescription>For a real decision with your team. You get a link to share. No account, no email.</CardDescription>
       </CardHeader>
       <CardContent>
         <form className="space-y-4" onSubmit={(e) => void submit(e)}>
           <div className="space-y-1.5">
             <Label htmlFor="q">The decision</Label>
-            <Input id="q" maxLength={200} placeholder="Which vendor should we sign?" value={question} onChange={(e) => setQuestion(e.target.value)} />
+            <Input id="q" dir="auto" maxLength={200} placeholder="Which vendor should we sign?" value={question} onChange={(e) => setQuestion(e.target.value)} />
           </div>
           <fieldset className="space-y-1.5">
             <legend className="text-sm font-medium">The options (2 to 4)</legend>
@@ -172,6 +177,7 @@ function StartRoomCard() {
               <div key={i} className="flex items-center gap-2">
                 <Input
                   aria-label={`Option ${i + 1}`}
+                  dir="auto"
                   aria-describedby={optionHint ? "option-hint" : undefined}
                   minLength={2}
                   maxLength={40}

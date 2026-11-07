@@ -94,7 +94,8 @@ export function NotesPhase() {
           aria-label="Your private notes"
           data-testid="notes-input"
           rows={14}
-          className="min-h-72 leading-relaxed"
+          dir="auto"
+          className="min-h-72 text-base leading-relaxed sm:text-sm"
           placeholder="What do you know that bears on this decision? Prices, past incidents, promises, doubts. One sentence per fact works best."
           value={text}
           maxLength={NOTES_MAX}
@@ -109,10 +110,16 @@ export function NotesPhase() {
         <p className="mt-1.5 text-xs text-muted-foreground" aria-live="polite" data-testid="notes-state">
           {state === "saved" ? "Saved." : state === "saving" ? "Saving..." : "Not saved yet."} Next you turn these notes into cards, one fact each.
         </p>
-        <p className="mt-1 text-xs text-muted-foreground" data-testid="gemini-notice">
-          Notes you turn into cards, and your chat messages, are sent to Google's Gemini API (free tier). Google's terms for it say "human reviewers may read, annotate, and process your API input and output." and "Do not submit
-          sensitive, confidential, or personal information to the Unpaid Services." Use made-up or non-sensitive text.
-        </p>
+        <div className="mt-1 text-xs text-muted-foreground" data-testid="gemini-notice">
+          <p>Notes you turn into cards, and chat messages, go to Google's Gemini API (free tier). Use made-up or non-sensitive text.</p>
+          <details>
+            <summary className="inline-block cursor-pointer py-1 underline">Google's terms</summary>
+            <p>
+              Google's terms for it say "human reviewers may read, annotate, and process your API input and output." and "Do not submit
+              sensitive, confidential, or personal information to the Unpaid Services."
+            </p>
+          </details>
+        </div>
       </section>
 
       <section aria-labelledby="lean-title">

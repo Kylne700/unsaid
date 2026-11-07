@@ -54,7 +54,7 @@ export function WeighPhase() {
 
   return (
     <section aria-labelledby="weigh-title">
-      <SectionTitle hint="Blind round: you see each fact without its option, without who knew it, and without anyone's ratings. Rate every card.">
+      <SectionTitle hint={`Blind round: you see each fact without its option, without who knew it, and without anyone's ratings. Rate every card.${canMerge ? " If you also knew a fact, press Same as mine under it." : ""}`}>
         <span id="weigh-title">How much does this matter?</span>
       </SectionTitle>
       <div className="mb-4 flex flex-wrap items-center gap-4">
@@ -76,7 +76,7 @@ export function WeighPhase() {
                 <p className="text-sm leading-relaxed">
                   <span className="mr-2 text-xs text-muted-foreground">{i + 1}.</span>
                   {canMerge && c.mine ? <Tag className="mr-2 border-primary/40 text-primary">Yours</Tag> : null}
-                  {c.neutral}
+                  <span dir="auto">{c.neutral}</span>
                 </p>
                 {canMerge && !c.mine ? (
                   <div className="mt-1">
@@ -103,7 +103,7 @@ export function WeighPhase() {
                           <select
                             aria-label="Which of your cards states the same fact?"
                             data-testid="same-as-mine-pick"
-                            className={cn(selectClass, "h-8 w-full text-xs")}
+                            className={cn(selectClass, "h-8 w-full text-base sm:text-xs")}
                             value={ownId}
                             onChange={(e) => {
                               setOwn(e.target.value);

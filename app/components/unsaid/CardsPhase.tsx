@@ -83,15 +83,15 @@ function DraftRow({ d }: { d: DraftView }) {
   const ready = option !== null && polarity !== null;
   return (
     <li className="rounded-lg border bg-card p-4" data-testid="draft">
-      <div className="mb-2 flex flex-wrap items-center gap-2">
+      <div className="mb-2 flex flex-wrap items-center gap-2 empty:hidden">
         {d.origin === "practice" ? <Tag className="border-sky-500/40 bg-sky-500/10 text-sky-800 dark:text-sky-200">prepared for practice</Tag> : null}
         {d.origin === "notes" ? <Tag className="text-muted-foreground">from your notes</Tag> : null}
-        <span className="text-xs text-muted-foreground">Private until you approve it.</span>
       </div>
       <Textarea
         aria-label="Card text: one fact"
         rows={2}
-        className="min-h-0"
+        dir="auto"
+        className="min-h-0 text-base sm:text-sm"
         value={text}
         onChange={(e) => setText(e.target.value)}
         onBlur={() => {
@@ -126,7 +126,8 @@ function DraftRow({ d }: { d: DraftView }) {
       <label className="mt-3 block text-xs text-muted-foreground">
         Same fact without the option name (this is all teammates see while they weigh)
         <Input
-          className="mt-1 h-9 text-sm text-foreground"
+          dir="auto"
+          className="mt-1 h-9 text-base text-foreground sm:text-sm"
           value={neutral}
           onChange={(e) => {
             setNeutral(e.target.value);
@@ -173,7 +174,7 @@ function NewDraft() {
       <label className="block text-sm font-medium" htmlFor="new-draft-text">
         Add a fact by hand
       </label>
-      <Input id="new-draft-text" className="mt-2" placeholder="One fact, e.g. The vendor charges per seat after 50 seats" value={text} onChange={(e) => setText(e.target.value)} />
+      <Input id="new-draft-text" dir="auto" className="mt-2" placeholder="One fact, e.g. The vendor charges per seat after 50 seats" value={text} onChange={(e) => setText(e.target.value)} />
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <OptionPick label="Which option is the new fact about?" value={option} onPick={setOption} />
         <PolarityPick value={polarity} onPick={setPolarity} />
@@ -196,7 +197,7 @@ function LedgerItem({ c, all }: { c: LedgerCardView; all: LedgerCardView[] }) {
     <li className={cn("rounded-lg border bg-card p-3 text-sm", only && "border-amber-500/60")} data-testid="ledger-card" data-card-id={c.id} data-holders={c.holderCount}>
       <div className="flex items-start gap-2">
         <PolarityMark polarity={c.polarity} />
-        <p className="flex-1 leading-snug">{c.text}</p>
+        <p className="flex-1 leading-snug" dir="auto">{c.text}</p>
       </div>
       {known ? (
         <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
@@ -227,7 +228,7 @@ function LedgerItem({ c, all }: { c: LedgerCardView; all: LedgerCardView[] }) {
           {same.length ? (
             <select
               aria-label="Merge with a card that states the same fact"
-              className={cn(selectClass, "h-8 max-w-full text-xs")}
+              className={cn(selectClass, "h-8 max-w-full text-base sm:text-xs")}
               value=""
               onChange={(e) => {
                 if (e.target.value) void run("merge-cards", { keepId: c.id, absorbId: e.target.value });
@@ -297,7 +298,7 @@ export function CardsPhase() {
         {room.notes ? (
           <details className="mb-3 rounded-lg border bg-card px-4 py-2 text-sm">
             <summary className="cursor-pointer font-medium">Your notes (private)</summary>
-            <p className="mt-2 whitespace-pre-wrap text-muted-foreground">{room.notes}</p>
+            <p className="mt-2 whitespace-pre-wrap text-muted-foreground" dir="auto">{room.notes}</p>
           </details>
         ) : null}
         <ul className="space-y-3" aria-label="Your draft cards" data-testid="drafts">
@@ -305,7 +306,11 @@ export function CardsPhase() {
             <DraftRow key={`${d.id}|${d.text}|${d.neutral}|${d.option}|${d.polarity}`} d={d} />
           ))}
         </ul>
-        {drafts.length === 0 ? <p className="mb-3 text-sm text-muted-foreground">No drafts right now.</p> : null}
+        {drafts.length === 0 ? (
+          <p className="mb-3 text-sm text-muted-foreground">
+            {ledger.length === 0 ? "Press Draft cards from my notes, or add a fact by hand below." : "All your drafts are approved. Add another fact by hand, or press I'm done."}
+          </p>
+        ) : null}
         <div className="mt-3">
           <NewDraft />
         </div>
@@ -318,7 +323,7 @@ export function CardsPhase() {
         <p className="mb-3 text-sm text-muted-foreground" data-testid="others-card-count" data-count={othersCount} aria-live="polite">
           {othersCount === 0 ? "The others have not approved any cards yet." : `${othersCount} card${othersCount === 1 ? "" : "s"} approved by the others so far.`}
         </p>
-        {ledger.length === 0 ? <p className="text-sm text-muted-foreground">You have not approved any cards yet.</p> : null}
+        {ledger.length === 0 && drafts.length > 0 ? <p className="mb-3 text-sm text-muted-foreground">Approve a draft above and it appears here, under its option.</p> : null}
         <div className={cn(OPTION_COLUMNS, "gap-4")} style={optionColumns(room.options.length)}>
           {room.options.map((o) => {
             const cards = [...ledger.filter((c) => c.option === o.id)].sort((a, b) => (a.polarity === b.polarity ? 0 : a.polarity === "pro" ? -1 : 1));

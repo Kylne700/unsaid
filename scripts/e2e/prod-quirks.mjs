@@ -129,16 +129,17 @@ for (const [label, opts] of [
 }
 
 // ---- C. the connection drops while someone is typing notes ----------------------------------------------------------------
-// The first failed call makes the framework load a script chunk; offline that load fails, and its head script used to reload the
-// page into the browser's offline page, with the unsaved notes gone. Ten rounds, because it did not happen every time.
-{
-  const ROUNDS = 10;
+// The first failed call makes the framework load a script chunk; offline that load fails, and the framework's head script used to
+// reload the page into the browser's offline page, with the unsaved notes gone. Rounds, because it did not happen every time.
+// The framework runs different recovery code on a local host (127.0.0.1) and on a real one, so the check runs on both: for the second
+// the browser maps a made-up name to the test server (nothing leaves the machine).
+async function offlineWhileTyping(title, origin, rounds, options = {}) {
   let blank = 0;
   let lost = 0;
-  for (let i = 0; i < ROUNDS; i++) {
-    const c = await newPlayer("offline" + i);
+  for (let i = 0; i < rounds; i++) {
+    const c = await newPlayer("offline" + i, options);
     try {
-      await c.page.goto(`${BASE}/`);
+      await c.page.goto(`${origin}/`);
       await c.page.getByTestId("try-trap").click();
       await c.page.waitForURL(/\/r\/[A-Z0-9]{4,12}$/);
       await phase(c.page, "notes");
@@ -148,7 +149,7 @@ for (const [label, opts] of [
       await c.ctx.setOffline(true);
       await box.fill("saved while online\ntyped after the connection dropped");
       await c.page.waitForTimeout(2200);
-      if (!c.page.url().startsWith(BASE)) blank++;
+      if (!c.page.url().startsWith(origin)) blank++;
       else if ((await box.inputValue().catch(() => "")) !== "saved while online\ntyped after the connection dropped") lost++;
     } catch (e) {
       lost++;
@@ -156,8 +157,15 @@ for (const [label, opts] of [
       await c.close();
     }
   }
-  check(`offline while typing: the page stays and keeps the typed notes (${ROUNDS} rounds)`, blank === 0 && lost === 0, `${blank} browser offline pages, ${lost} lost texts`);
+  check(`${title} (${rounds} rounds)`, blank === 0 && lost === 0, `${blank} browser offline pages, ${lost} lost texts`);
 }
+await offlineWhileTyping("offline while typing: the page stays and keeps the typed notes", BASE, 10);
+const ALIAS = "unsaid-test.example";
+const aliasOrigin = BASE.replace("127.0.0.1", ALIAS);
+await offlineWhileTyping("offline while typing on a real host name: the page stays and keeps the typed notes", aliasOrigin, 6, {
+  allowHost: ALIAS,
+  args: [`--host-resolver-rules=MAP ${ALIAS} 127.0.0.1`, `--unsafely-treat-insecure-origin-as-secure=${aliasOrigin}`],
+});
 
 const failed = checks.filter((c) => !c.ok);
 console.log(`\n${checks.length - failed.length}/${checks.length} checks passed`);

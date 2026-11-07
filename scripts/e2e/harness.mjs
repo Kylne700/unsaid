@@ -30,8 +30,9 @@ const arg = (name, fallback) => process.argv.find((a) => a.startsWith(`--${name}
 export const BASE = arg("base", "http://127.0.0.1:18744");
 const PW_CORE = arg("pw-core", "playwright-core");
 
-// `context` takes any other Playwright context option, for example timezoneId or extraHTTPHeaders.
-export async function newPlayer(label, { width = 1280, height = 860, ...context } = {}) {
+// `context` takes any other Playwright context option, for example timezoneId or extraHTTPHeaders. `allowHost` is one more host name the
+// browser may reach (a name mapped to the test server with --host-resolver-rules in `args`).
+export async function newPlayer(label, { width = 1280, height = 860, allowHost = "", ...context } = {}) {
   const { chromium } = await import(PW_CORE);
   const profile = mkdtempSync(path.join(tmpdir(), `unsaid-e2e-${label}-`));
   const ctx = await chromium.launchPersistentContext(profile, {
@@ -43,7 +44,7 @@ export async function newPlayer(label, { width = 1280, height = 860, ...context 
   const blocked = [];
   await ctx.route("**/*", (route) => {
     const u = new URL(route.request().url());
-    if (u.hostname === "127.0.0.1" || u.protocol === "data:" || u.protocol === "blob:") return route.continue();
+    if (u.hostname === "127.0.0.1" || (allowHost && u.hostname === allowHost) || u.protocol === "data:" || u.protocol === "blob:") return route.continue();
     blocked.push(u.hostname);
     return route.abort();
   });

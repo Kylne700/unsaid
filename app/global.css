@@ -51,6 +51,31 @@
   padding-bottom: 4.5rem;
 }
 
+/* The chat chips are what a visitor clicks: 12 px like the rest of the page, and they wrap onto more rows (the toolkit's fixed one-row slot grows with them) instead of running off the panel's edge. */
+[data-agent-suggestion-title] {
+  font-size: 12px;
+}
+.agentkit-host-suggestions-slot {
+  block-size: auto;
+  min-block-size: 3.5rem;
+}
+.agentkit-host-suggestions-slot [data-agent-suggestion-scroller="true"] {
+  block-size: auto;
+}
+[data-agent-suggestion-scroller] [data-agent-suggestion-track] {
+  width: 100%;
+  height: auto;
+  flex-wrap: wrap;
+}
+button[data-agent-suggestion-chip] {
+  font-size: 12px;
+  height: auto;
+  min-height: 1.5rem;
+  max-width: 100%;
+  white-space: normal;
+  padding-block: 0.125rem;
+}
+
 .chat-layout-shell {
   --agent-layout-left-drawer-expanded-width: var(--chat-sidebar-width);
   --agent-layout-left-drawer-collapsed-width: 3rem;

@@ -154,7 +154,9 @@ export function RoomScreen({ code, token, room, refresh, paused }: { code: strin
         right={
           <span className="flex items-center gap-3">
             <span className="font-mono tracking-widest" data-testid="room-code">{room.code}</span>
-            <AgentToggleButton />
+            {/* Phones: the assistant opens only from this button, so it gets a visible name and a 44 px touch target (the panel is open on desktop). */}
+            <span className="text-xs text-muted-foreground sm:hidden" aria-hidden>Assistant</span>
+            <AgentToggleButton className="size-11 sm:size-6" />
           </span>
         }
       >

@@ -69,6 +69,14 @@ const EARLY_CLICK_HOLD =
   'window.addEventListener("click",hold,true);' +
   'window.addEventListener("unsaid:hydrated",function(){window.removeEventListener("click",hold,true);if(held&&held.isConnected&&!held.disabled)held.click()},{once:true})})();';
 
+// Link preview (Slack, Discord, X): one sentence and a static picture. The framework's own generated preview image answers HTTP 500 here,
+// and it adds itself only to a page that has no og:image, so ours must be in every page. The picture is a copy of docs/shots/10-live-ana-notes.png.
+// shortcut: the live address is written in here; change SHARE_IMAGE if the site moves.
+const SHARE_TITLE = "Unsaid: decide with what your team never said";
+const SHARE_TEXT =
+  "Unsaid is a group decision room built to get the fact only one person knows onto the table. Private notes become fact cards you approve yourself, everyone rates every fact blind, votes are sealed.";
+const SHARE_IMAGE = "https://unsaid-room.netlify.app/og-image.png";
+
 export function Layout({ children }: { children: React.ReactNode }) {
   // Layout wraps the page, the error page and the fallback alike, and its effect runs after the whole tree has committed.
   useEffect(() => {
@@ -102,6 +110,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
           content="black-translucent"
         />
         <meta name="apple-mobile-web-app-title" content={APP_TITLE} />
+        <meta name="description" content={SHARE_TEXT} />
+        <meta property="og:title" content={SHARE_TITLE} />
+        <meta property="og:description" content={SHARE_TEXT} />
+        <meta property="og:image" content={SHARE_IMAGE} />
+        <meta property="og:image:alt" content="Unsaid's notes screen: a decision with its options, private notes, and a lean nobody sees until the reveal." />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:image" content={SHARE_IMAGE} />
         <link rel="icon" type="image/svg+xml" href={appPath("/favicon.svg")} />
         <link rel="apple-touch-icon" href={appPath("/icon-180.svg")} />
         <Meta />

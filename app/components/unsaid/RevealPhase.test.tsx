@@ -38,12 +38,45 @@ function twoPersonReveal(): RoomView {
   return viewRoom(room, ana);
 }
 
+/** A live room of one (Ana) that approved `cards` facts of her own and voted: every fact is one only she knew. */
+function soloReveal(cards: number): RoomView {
+  const made = createRoom({ code: "SOLORM", question: "Which city should we move to?", options: ["Lisbon", "Berlin"], creatorName: "Ana" });
+  const room = made.room;
+  const ana = must(memberByToken(room, made.token));
+  saveNotes(room, ana, "Some notes.");
+  setInitialPick(room, ana, "A");
+  forceAdvance(room, ana); // cards
+  for (let i = 1; i <= cards; i++) approveDraft(room, ana, saveDraft(room, ana, { text: `Lisbon fact number ${i}.`, option: "A", polarity: "pro" }).id);
+  forceAdvance(room, ana); // weigh
+  for (const c of room.cards) rateCard(room, ana, c.id, 2);
+  forceAdvance(room, ana); // vote
+  castVote(room, ana, "A"); // the last vote: the room reveals by itself
+  return viewRoom(room, ana);
+}
+
+describe("RevealPhase wording for a room of one", () => {
+  it("says why nothing differs, and reads 'The 1 fact' / 'the 1 card', never 'All 1 facts' or 'all 1 cards'", () => {
+    const one = page(soloReveal(1));
+    expect(one).toContain("You are alone here, so every fact is one only you knew. Invite a teammate to see the difference.");
+    expect(one).toContain("The 1 fact");
+    expect(one).toContain("the 1 card");
+    expect(one).not.toMatch(/all 1 (facts|cards)/i);
+    expect(one).not.toContain("at least two of you held");
+    const two = page(soloReveal(2));
+    expect(two).toContain("You are alone here");
+    expect(two).toContain("All 2 facts");
+    expect(two).toContain("all 2 cards");
+    expect(two).not.toMatch(/the 1 (fact|card)/i);
+  });
+});
+
 describe("RevealPhase wording for a pair", () => {
   it("two people read 'both' (grid row, replay headline), never 'all two'; three still read 'all three'", () => {
     const two = twoPersonReveal();
     expect(two.reveal?.members).toHaveLength(2);
     const live = page(two);
     expect(live).toContain("Only what both knew");
+    expect(live).not.toContain("You are alone here");
     // The headline form exists only in the replay room, so flag the same view as one.
     const replay = page({ ...two, practice: { title: "Replay", replay: true } });
     expect(replay).toContain("Alone, both leaned to");

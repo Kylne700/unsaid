@@ -16,6 +16,9 @@ const fixed = (x: number) => (x.toFixed(2) === "-0.00" ? "0.00" : x.toFixed(2));
 const NUMBER_WORD = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight"];
 /** How many people, as the headline and the grid row say it: "both" for a pair, else "all three", "all four", ... */
 const allOf = (n: number) => (n === 2 ? "both" : `all ${NUMBER_WORD[n] ?? n}`);
+const allCards = (n: number) => (n === 1 ? "the 1 card" : `all ${n} cards`);
+/** A room of one has no shared facts, so the two-person comparison would read as an empty set. */
+const SOLO_HINT = "You are alone here, so every fact is one only you knew. Invite a teammate to see the difference.";
 
 function placeOf(r: Ranking, optionId: string) {
   const i = r.groups.findIndex((g) => g.options.includes(optionId));
@@ -202,7 +205,7 @@ function ProofPanel({ rv }: { rv: RevealView }) {
                 cells={cells((o) => <Num text={fixed(o.sharedScore)} id={`proof-shared-${o.id}`} />, grid.sharedOn)}
               />
             ) : null}
-            <ProofRow id="full" label={`All ${rv.cards.length} facts`} cells={cells((o) => <Num text={fixed(o.fullScore)} id={`proof-full-${o.id}`} />, grid.fullOn)} />
+            <ProofRow id="full" label={rv.cards.length === 1 ? "The 1 fact" : `All ${rv.cards.length} facts`} cells={cells((o) => <Num text={fixed(o.fullScore)} id={`proof-full-${o.id}`} />, grid.fullOn)} />
             <ProofRow id="votes" label="Final votes" cells={cells((o) => <span data-testid={`proof-votes-${o.id}`}>{o.votes}</span>, grid.votesOn)} />
           </tbody>
         </table>
@@ -273,7 +276,7 @@ export function RevealPhase() {
   // The viewer's own column first, then the others in the room's order.
   const columns = [...rv.members].sort((a, b) => Number(b.id === v.id) - Number(a.id === v.id));
   const topShared = rv.sharedRanking.groups[0]?.options ?? [];
-  const inside = ["scores by option", alone && "alone check", guess && "guess who", rv.cards.length ? `all ${rv.cards.length} cards` : ""].filter(Boolean).join(", ");
+  const inside = ["scores by option", alone && "alone check", guess && "guess who", rv.cards.length ? allCards(rv.cards.length) : ""].filter(Boolean).join(", ");
 
   return (
     <div className="space-y-10" data-testid="reveal">
@@ -311,7 +314,9 @@ export function RevealPhase() {
         <section aria-labelledby="unique-title">
           <SectionTitle
             hint={
-              rv.moved
+              rv.members.length === 1
+                ? SOLO_HINT
+                : rv.moved
                 ? `On the facts that at least two of you held, ${rv.sharedRanking.tiedFirst ? `nothing separated ${names(topShared)}` : `${names(topShared)} ranked first`}. The facts below moved ${[
                     rv.moved.up.length ? `${names(rv.moved.up)} up` : "",
                     rv.moved.down.length ? `${names(rv.moved.down)} down` : "",
@@ -366,7 +371,7 @@ export function RevealPhase() {
                     </th>
                     <th scope="col" className="px-4 py-3 font-medium" data-testid="col-full">
                       Full ledger
-                      <span className="block font-normal">all {rv.cards.length} cards</span>
+                      <span className="block font-normal">{allCards(rv.cards.length)}</span>
                     </th>
                     {columns.map((m) => (
                       <th key={m.id} scope="col" className="px-4 py-3 font-medium" data-testid={`col-own-${m.id}`}>
@@ -403,7 +408,7 @@ export function RevealPhase() {
           {rv.cards.length ? (
             <section aria-labelledby="cards-title">
               <SectionTitle>
-                <span id="cards-title">All {rv.cards.length} cards with their team weights</span>
+                <span id="cards-title">{rv.cards.length === 1 ? "The 1 card with its team weight" : `All ${rv.cards.length} cards with their team weights`}</span>
               </SectionTitle>
               <table className="w-full text-left text-sm">
                 <thead className="text-xs text-muted-foreground">

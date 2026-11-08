@@ -9,7 +9,7 @@ import { MIGRATIONS } from "../db/migrations";
 import { loadRoom } from "../db/store";
 import { memberByToken } from "../domain/room";
 import { must } from "../domain/test-helpers";
-import { assertNoStandardKey, BUSY, CHAT_TIMEOUT_MS, chatEngine, completeForSeat, ENGINE_NAME, GEMINI_MODEL, guardedChatEngine, MAX_OUTPUT_TOKENS, NOT_ANSWERING, NOT_IN_A_ROOM, NOTHING_TO_ADD, OUT_OF_QUOTA } from "./gemini";
+import { assertNoStandardKey, BUSY, CHAT_TIMEOUT_MS, chatEngine, completeForSeat, ENGINE_NAME, GEMINI_MODEL, guardedChatEngine, MAX_OUTPUT_TOKENS, NOT_ANSWERING, NOT_IN_A_ROOM, NOTHING_TO_ADD, OUT_OF_QUOTA, quotaFetch, SAVED_NO_SUMMARY } from "./gemini";
 import { guestOwner, seatBucket } from "./guest";
 import { MEMBER_DAILY_CAP, pauseLlm } from "./llm-quota";
 
@@ -267,6 +267,182 @@ describe("assertNoStandardKey", () => {
     expect(() => assertNoStandardKey({ GOOGLE_GENERATIVE_AI_API_KEY: "x" })).toThrow(/UNSAID_GEMINI_API_KEY/);
     expect(() => assertNoStandardKey({ GEMINI_API_KEY: "x" })).toThrow();
     expect(() => assertNoStandardKey({ GEMINI_API_KEY: "  ", UNSAID_GEMINI_API_KEY: "x" })).not.toThrow();
+  });
+});
+
+const SKIP = "skip_thought_signature_validator";
+const asOpts = (messages: unknown) => ({ systemPrompt: "s", messages, tools: [] }) as unknown as Partial<EngineStreamOptions>;
+const toolCall = (name: string, extra: Record<string, unknown> = {}) => ({ functionCall: { name, args: { a: 1 } }, ...extra });
+// A chat turn that ran a tool: the member's message, the model's tool call, and the tool's result that the next model call must read.
+const toolTurn = (isError = false) => [
+  { role: "user", content: [{ type: "text", text: "Please draft cards from my notes." }] },
+  { role: "assistant", content: [{ type: "tool-call", id: "call_1", name: "extract-cards", input: {} }] },
+  { role: "user", content: [{ type: "tool-result", toolCallId: "call_1", toolName: "extract-cards", toolInput: "{}", content: '{"saved":4}', isError }] },
+];
+
+describe("quotaFetch: the thought signature on a replayed tool call", () => {
+  /** What the network gets when `init` goes through quotaFetch for one seat. */
+  async function sendThrough(bucket: string, init?: RequestInit) {
+    const got: (RequestInit | undefined)[] = [];
+    vi.stubGlobal("fetch", async (_input: unknown, i?: RequestInit) => {
+      got.push(i);
+      return new Response("{}");
+    });
+    await quotaFetch(bucket)("https://generativelanguage.googleapis.com/v1beta/models/x:streamGenerateContent?alt=sse", init);
+    return got[0];
+  }
+
+  it("adds the dummy to each functionCall part that has none, and leaves a real signature and everything else as it was", async () => {
+    const s = await seat();
+    const body = {
+      contents: [
+        { role: "user", parts: [{ text: "hi" }] },
+        { role: "model", parts: [toolCall("one"), toolCall("two", { thoughtSignature: "REAL-SIGNATURE" }), { text: "t" }] },
+        { role: "user", parts: [{ functionResponse: { name: "one", response: { ok: true } } }] },
+      ],
+      generationConfig: { maxOutputTokens: 9 },
+    };
+    const sent = await sendThrough(s.bucket, { method: "POST", headers: { "x-goog-api-key": "k" }, body: JSON.stringify(body) });
+    const expected = structuredClone(body);
+    (expected.contents[1]!.parts[0] as Record<string, unknown>).thoughtSignature = SKIP;
+    expect(JSON.parse(String(sent?.body))).toEqual(expected);
+    expect(sent?.method).toBe("POST");
+    expect(sent?.headers).toEqual({ "x-goog-api-key": "k" });
+  });
+
+  it("sends everything else exactly as it came: no functionCall, an odd shape, not JSON, no body", async () => {
+    const s = await seat();
+    const bodies = [
+      JSON.stringify({ contents: [{ role: "user", parts: [{ text: "hi" }] }] }),
+      JSON.stringify({ contents: [{ role: "model", parts: [toolCall("one", { thoughtSignature: "REAL" })] }] }),
+      JSON.stringify({ contents: "nope" }),
+      JSON.stringify({ contents: [null, { parts: 5 }, { parts: [null, 3, "x"] }] }),
+      JSON.stringify([1, 2]),
+      "null",
+      "not json {",
+      "",
+    ];
+    for (const body of bodies) {
+      const init = { method: "POST", body };
+      expect(await sendThrough(s.bucket, init)).toBe(init); // the very same request, not a copy
+    }
+    const noBody = { method: "GET" };
+    expect(await sendThrough(s.bucket, noBody)).toBe(noBody);
+    expect(await sendThrough(s.bucket, undefined)).toBeUndefined();
+    const bytes = { method: "POST", body: new Uint8Array([1, 2, 3]) };
+    expect(await sendThrough(s.bucket, bytes)).toBe(bytes);
+  });
+});
+
+describe("a tool turn through the real engine (stubbed network that refuses like the API)", () => {
+  /** The API answers HTTP 400 to a replayed functionCall part without a thoughtSignature, and streams a text answer otherwise. */
+  function apiLike() {
+    const sent: { contents: { parts: Record<string, unknown>[] }[] }[] = [];
+    vi.stubGlobal("fetch", async (_input: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      sent.push(body);
+      if (body.contents.some((c: { parts: Record<string, unknown>[] }) => c.parts.some((p) => p.functionCall && !p.thoughtSignature))) {
+        const error = { code: 400, message: "Function call is missing a thought_signature in functionCall parts.", status: "INVALID_ARGUMENT" };
+        return new Response(JSON.stringify({ error }), { status: 400, headers: { "content-type": "application/json" } });
+      }
+      const chunk = { candidates: [{ content: { role: "model", parts: [{ text: "FROM-GEMINI" }] }, finishReason: "STOP" }], usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 2, totalTokenCount: 7 } };
+      return new Response(`data: ${JSON.stringify(chunk)}\n\n`, { status: 200, headers: { "content-type": "text/event-stream" } });
+    });
+    return sent;
+  }
+
+  it("ends with the model's own text after the tool result, not a fixed sentence", async () => {
+    vi.stubEnv("UNSAID_GEMINI_API_KEY", "test-key-not-real");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const sent = apiLike();
+    const s = await seat();
+    expect(await asSeat(s, () => textOf(chatEngine, asOpts(toolTurn())))).toBe("FROM-GEMINI");
+    expect(sent.length).toBe(1);
+    expect(sent[0]!.contents[1]!.parts[0]).toMatchObject({ functionCall: { name: "extract-cards" }, thoughtSignature: SKIP });
+    expect(log).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it("answers a turn that has no tool call as before: nothing added", async () => {
+    vi.stubEnv("UNSAID_GEMINI_API_KEY", "test-key-not-real");
+    const sent = apiLike();
+    const s = await seat();
+    expect(await asSeat(s, () => textOf(chatEngine, asOpts([toolTurn()[0]])))).toBe("FROM-GEMINI");
+    expect(JSON.stringify(sent[0])).not.toContain("thoughtSignature");
+  });
+});
+
+describe("the chat engine when a call fails after a tool ran", () => {
+  const silenced = () => vi.spyOn(console, "error").mockImplementation(() => {});
+  const throwing = (text: string) =>
+    modelThat(async function* () {
+      throw new Error(text);
+    });
+
+  it("says the change is saved, not that the AI is silent, and logs why", async () => {
+    const log = silenced();
+    const s = await seat();
+    expect(await asSeat(s, () => textOf(throwing("model said no"), asOpts(toolTurn())))).toBe(SAVED_NO_SUMMARY);
+    const reported = modelThat(async function* () {
+      yield { type: "stop", reason: "error", error: "Function call is missing a thought_signature", statusCode: 400 };
+    });
+    expect(await asSeat(s, () => textOf(reported, asOpts(toolTurn())))).toBe(SAVED_NO_SUMMARY);
+    expect(log.mock.calls).toEqual([["[unsaid-gemini]", "model said no"], ["[unsaid-gemini]", "HTTP 400: Function call is missing a thought_signature"]]);
+    log.mockRestore();
+  });
+
+  it("keeps the old sentence when the last message is the member's, when the tool itself failed, or when the run has no messages", async () => {
+    const log = silenced();
+    const s = await seat();
+    for (const opts of [asOpts([toolTurn()[0]]), asOpts(toolTurn(true)), asOpts([]), {}]) {
+      expect(await asSeat(s, () => textOf(throwing("x"), opts))).toBe(NOT_ANSWERING);
+    }
+    log.mockRestore();
+  });
+
+  it("keeps the busy sentence when a 429 started the pause during that call", async () => {
+    const log = silenced();
+    const s = await seat();
+    const engine = modelThat(async function* () {
+      pauseLlm(400);
+      yield { type: "stop", reason: "error", error: PROVIDER_DETAIL, statusCode: 429, providerRetryable: true };
+    });
+    expect(await asSeat(s, () => textOf(engine, asOpts(toolTurn())))).toBe(BUSY);
+    await sleep(450);
+    log.mockRestore();
+  });
+
+  it("logs the reason cut short and without the key, while the member reads only the fixed sentence", async () => {
+    vi.stubEnv("UNSAID_GEMINI_API_KEY", "test-key-not-real");
+    const log = silenced();
+    const s = await seat();
+    const engine = modelThat(async function* () {
+      yield { type: "stop", reason: "error", error: `bad key test-key-not-real ${"x".repeat(500)}`, statusCode: 403 };
+    });
+    const events = await asSeat(s, () => eventsOf(engine));
+    expect(log).toHaveBeenCalledTimes(1);
+    const [tag, reason] = log.mock.calls[0] as [string, string];
+    expect(tag).toBe("[unsaid-gemini]");
+    expect(reason).toMatch(/^HTTP 403: bad key \[key\] x+$/);
+    expect(reason.length).toBe(300);
+    expect(JSON.stringify(events)).not.toMatch(/test-key-not-real|HTTP 403|bad key/);
+    log.mockRestore();
+  });
+
+  it("logs nothing when the member pressed Stop", async () => {
+    const log = silenced();
+    const s = await seat();
+    const stop = new AbortController();
+    const engine = modelThat(async function* (o) {
+      await new Promise((resolve) => o.abortSignal.addEventListener("abort", resolve));
+      throw new Error("aborted");
+    });
+    const run = asSeat(s, () => eventsOf(engine, { abortSignal: stop.signal }));
+    await sleep(50);
+    stop.abort();
+    await run;
+    expect(log).not.toHaveBeenCalled();
+    log.mockRestore();
   });
 });
 

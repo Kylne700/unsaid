@@ -135,6 +135,7 @@ function JoinCard() {
 function StartRoomCard() {
   const navigate = useNavigate();
   const make = useActionMutation("create-room");
+  const [retrying, setRetrying] = useState(false);
   const [question, setQuestion] = useState("");
   const [options, setOptions] = useState(["", ""]);
   const [name, setName] = useState("");
@@ -146,16 +147,30 @@ function StartRoomCard() {
       ? "Each option needs a different name."
       : null;
   const valid = question.trim().length >= 3 && filled.length >= 2 && !optionHint && name.trim().length > 0;
+  const busy = make.isPending || retrying;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!valid) return;
+    const input = { question: question.trim(), options: filled, name: name.trim() };
     try {
-      const r = await make.mutateAsync({ question: question.trim(), options: filled, name: name.trim() });
+      let r;
+      try {
+        r = await make.mutateAsync(input);
+      } catch (err) {
+        // One quiet second try after 1 s for a server fault or a lost connection (the live site answered 500 once in 7 first clicks); a 4xx would answer the same. A duplicate empty room is harmless.
+        const status = (err as { status?: unknown } | null)?.status;
+        if (typeof status === "number" && status < 500) throw err;
+        setRetrying(true);
+        await new Promise((go) => setTimeout(go, 1000));
+        r = await make.mutateAsync(input);
+      }
       saveToken(r.code, r.token);
       navigate(`/r/${r.code}`);
     } catch {
       // make.error carries the message
+    } finally {
+      setRetrying(false);
     }
   }
 
@@ -207,10 +222,10 @@ function StartRoomCard() {
             <Label htmlFor="n">Your name</Label>
             <Input id="n" maxLength={40} placeholder="e.g. Dana" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
-          <Button type="submit" variant="outline" disabled={!valid || make.isPending} aria-busy={make.isPending} data-testid="start-room">
-            {make.isPending ? "Starting..." : "Start a room"}
+          <Button type="submit" variant="outline" disabled={!valid || busy} aria-busy={busy} data-testid="start-room">
+            {busy ? "Starting..." : "Start a room"}
           </Button>
-          {make.error ? (
+          {make.error && !retrying ? (
             <p role="alert" className={`text-sm ${errorText}`}>
               {friendlyError(make.error)}
             </p>

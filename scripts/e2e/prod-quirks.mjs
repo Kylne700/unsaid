@@ -8,6 +8,10 @@
 //  C. The connection drops while notes are being typed: the page must stay (no reload into the browser's offline page).
 //  D. A click before the page's scripts have arrived (the buttons are on screen about 1 s before React answers, longer on a phone):
 //     it must count exactly once, not vanish and not start two rooms.
+//  E. "Start a room" answered with a server fault (HTTP 500, seen once on the live site) or a lost connection: one quiet second try
+//     after about 1 s, the button busy and no error in between; a second fault shows the error; a 4xx is not tried again.
+//  F. The link preview: our own picture in og:image and twitter:image (the framework's generated one answers HTTP 500 and is added only
+//     to a page that has none), a description, and the picture itself served as a PNG.
 // Run: node scripts/e2e/prod-quirks.mjs --base=http://127.0.0.1:<port> --pw-core=<path to playwright-core/index.mjs>
 import { assertClean, BASE, newPlayer } from "./harness.mjs";
 
@@ -211,6 +215,84 @@ await clickScenario("early click on See the trap: the replay opens (proof-panel 
 await clickScenario("early click on Do it yourself: the practice room opens, 1 request, 0 page errors", { testid: "try-trap", early: true, clicks: 1, opens: opensPractice });
 await clickScenario("two early clicks on See the trap: exactly 1 request, 0 page errors", { testid: "see-trap", early: true, clicks: 2, opens: opensReplay });
 await clickScenario("a normal click once the page is ready: exactly 1 room, 0 page errors", { testid: "try-trap", early: false, clicks: 1, opens: opensPractice });
+
+// ---- E. "Start a room" and a server fault ----------------------------------------------------------------------------------------
+// The first create-room requests are answered here with the listed outcomes (the server never sees them); after the list, requests go through.
+const MAKE = /\/_agent-native\/actions\/create-room$/;
+async function startRoomScenario(title, { answers, retried }) {
+  const p = await newPlayer("retry");
+  const seen = []; // when each create-room request was made
+  try {
+    await p.page.route(MAKE, (route) => {
+      const answer = answers[seen.length] ?? 200;
+      seen.push(Date.now());
+      if (answer === 200) return route.fallback();
+      if (answer === "drop") return route.abort("failed");
+      return route.fulfill({ status: answer, contentType: "application/json", body: JSON.stringify({ error: "stub fault" }) });
+    });
+    await p.page.goto(`${BASE}/`);
+    await p.page.waitForFunction(() => Object.keys(document.querySelector('[data-testid="start-room"]') ?? {}).some((k) => k.startsWith("__reactProps")), null, { timeout: 20000 });
+    await p.page.getByLabel("The decision").fill("Which laptop should the design team buy?");
+    await p.page.getByLabel("Option 1").fill("Zeta");
+    await p.page.getByLabel("Option 2").fill("Omega");
+    await p.page.getByLabel("Your name").fill("Ana");
+    const button = p.page.getByTestId("start-room");
+    const alert = p.page.locator('form [role="alert"]');
+    await button.click();
+    for (let i = 0; i < 100 && seen.length < 1; i++) await p.page.waitForTimeout(50);
+    await p.page.waitForTimeout(150);
+    let busy = true;
+    let quiet = true;
+    for (let i = 0; i < 5; i++) { // the next 500 ms are inside the 1 s wait before the second try
+      busy &&= (await button.getAttribute("aria-busy")) === "true" && (await button.isDisabled());
+      quiet &&= (await alert.count()) === 0;
+      await p.page.waitForTimeout(100);
+    }
+    const opens = retried && answers.length === 1;
+    let shown = "";
+    if (opens) {
+      await opensPractice(p.page);
+    } else {
+      await alert.waitFor({ timeout: 8000 });
+      shown = (await alert.innerText()).trim();
+    }
+    await p.page.waitForTimeout(2500); // a third request would show up here
+    const gap = seen.length > 1 ? seen[1] - seen[0] : 0;
+    const errors = p.problems.filter((x) => x.includes("pageerror"));
+    const stayed = !/\/r\//.test(p.page.url());
+    const ok = retried
+      ? seen.length === 2 && busy && quiet && gap >= 900 && gap <= 3500 && errors.length === 0 && (opens ? !stayed : /Something went wrong on our side/.test(shown) && stayed && !(await button.isDisabled()))
+      : seen.length === 1 && /did not look right/.test(shown) && stayed && errors.length === 0;
+    check(title, ok, `create requests ${seen.length}; gap ${gap} ms; busy while waiting ${busy}; error hidden while waiting ${quiet}; ${opens ? "room opened" : `shown "${shown}"`}; page errors ${errors.length}`);
+  } catch (e) {
+    check(title, false, `${e.message.split("\n")[0]}; create requests ${seen.length}`);
+  } finally {
+    await p.close();
+  }
+}
+await startRoomScenario("Start a room answered 500 once: one quiet second try after about 1 s, busy button, no error in between, the room opens", { answers: [500], retried: true });
+await startRoomScenario("Start a room with a lost connection once: the same one second try, the room opens", { answers: ["drop"], retried: true });
+await startRoomScenario("Start a room answered 500 twice: exactly 2 requests (one retry), then the plain error and an enabled button", { answers: [500, 500], retried: true });
+await startRoomScenario("Start a room answered 400: no retry (1 request), the plain error is shown", { answers: [400], retried: false });
+
+{
+  const p = await newPlayer("preview");
+  try {
+    await p.page.goto(`${BASE}/`);
+    const head = await p.page.evaluate(() => ({
+      images: [...document.querySelectorAll('meta[property="og:image"], meta[name="twitter:image"]')].map((m) => m.content),
+      description: document.querySelector('meta[name="description"]')?.content ?? "",
+    }));
+    const res = await fetch(`${BASE}/og-image.png`);
+    const bytes = (await res.arrayBuffer()).byteLength;
+    const ours = head.images.length === 2 && head.images.every((u) => u === "https://unsaid-room.netlify.app/og-image.png");
+    check("Link preview: our own picture in og:image and twitter:image (no framework default), a description, and the picture is served as a PNG", ours && head.description.length > 40 && res.status === 200 && res.headers.get("content-type") === "image/png" && bytes > 10000, `images ${JSON.stringify(head.images)}; description ${head.description.length} chars; picture ${res.status} ${res.headers.get("content-type")} ${bytes} bytes`);
+  } catch (e) {
+    check("Link preview: our own picture in og:image and twitter:image, a description, the picture served", false, e.message.split("\n")[0]);
+  } finally {
+    await p.close();
+  }
+}
 
 const failed = checks.filter((c) => !c.ok);
 console.log(`\n${checks.length - failed.length}/${checks.length} checks passed`);

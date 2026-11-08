@@ -51,8 +51,13 @@ export function NotesPhase() {
     return p;
   }, [run]);
 
+  // The pick request in flight: "I'm done" waits for it, else the room can move on first and refuse the pick (409).
+  const picking = useRef<Promise<unknown> | null>(null);
   useEffect(() => {
-    beforeDone.current = save;
+    beforeDone.current = async () => {
+      await picking.current;
+      return save();
+    };
     return () => {
       beforeDone.current = null;
       clearTimeout(timer.current);
@@ -80,7 +85,9 @@ export function NotesPhase() {
 
   async function choose(optionId: string) {
     setPick(optionId);
-    const r = await run("set-initial-pick", { optionId });
+    const request = run("set-initial-pick", { optionId });
+    picking.current = request;
+    const r = await request;
     if (!r.ok) setPick(null);
   }
 

@@ -5,7 +5,7 @@
 // The key lives in UNSAID_GEMINI_API_KEY, not in the framework's GOOGLE_GENERATIVE_AI_API_KEY: under the standard
 // name the framework would also hand it to signed-in accounts, chat titles, embeddings and voice, with no seat check
 // and no quota. Setting a standard Google key name is therefore refused at start.
-import { createAISDKEngine, registerAgentEngine, type AgentEngine, type EngineEvent, type EngineStreamOptions } from "@agent-native/core/agent/engine";
+import { createAISDKEngine, registerAgentEngine, type AgentEngine, type EngineEvent, type EngineMessage, type EngineStreamOptions, type EngineToolResultPart } from "@agent-native/core/agent/engine";
 import { completeText } from "@agent-native/core/server";
 import { boundSeat, seatBucket } from "./guest";
 import { hasLlmRoom, llmRoom, pauseLlm, takeLlmRequest, type LlmRoom } from "./llm-quota";
@@ -28,36 +28,46 @@ const apiKey = () => process.env.UNSAID_GEMINI_API_KEY?.trim() ?? ""; // guard:a
 /** Whether a key is set (never the key itself). */
 export const geminiConfigured = () => apiKey() !== "";
 
-// Google's documented dummy for a replayed tool call's thought signature (the API answers HTTP 400 without one): the framework drops the real one, and @ai-sdk/google 3.0.141 swaps in this dummy itself, so this only keeps it if a provider update stops doing that.
-// shortcut: the dummy drops the model's own reasoning context; capture real signatures from the stream if follow-up answers degrade
-const SKIP_SIGNATURE = "skip_thought_signature_validator";
+// Why a call ended, for the server log: only Gemini's reason word. The text around it (finishMessage, the answer) can hold room notes.
+const REASON = /"(?:finishReason|blockReason)"\s*:\s*"([A-Z_]{1,40})"/g;
+const NORMAL_FINISH = ["STOP", "MAX_TOKENS"];
 
-/** The request as it goes out: a JSON body gets the dummy on each functionCall part that has no signature; anything else is untouched. */
-function withSignatures(init?: RequestInit): RequestInit | undefined {
-  if (typeof init?.body !== "string") return init;
-  let body: { contents?: { parts?: Record<string, unknown>[] }[] };
-  try {
-    body = JSON.parse(init.body);
-  } catch {
-    return init;
+function logReasons(text: string, logged: Set<string>): void {
+  for (const m of text.matchAll(REASON)) {
+    const reason = m[1] ?? "";
+    if (NORMAL_FINISH.includes(reason) || logged.has(reason)) continue;
+    logged.add(reason);
+    console.error("[unsaid-gemini]", `finish ${reason}`);
   }
-  let changed = false;
-  for (const content of Array.isArray(body?.contents) ? body.contents : []) {
-    for (const part of Array.isArray(content?.parts) ? content.parts : []) {
-      if (part?.functionCall && !part.thoughtSignature) {
-        part.thoughtSignature = SKIP_SIGNATURE;
-        changed = true;
-      }
-    }
+}
+
+/** A 200 answer, byte for byte as it came, with each abnormal finish reason logged once: a stream as it passes, a JSON body from a copy. */
+async function watched(res: Response): Promise<Response> {
+  if (!res.body) return res;
+  const logged = new Set<string>();
+  if (!res.headers.get("content-type")?.includes("event-stream")) {
+    logReasons(await res.clone().text().catch(() => ""), logged);
+    return res;
   }
-  return changed ? { ...init, body: JSON.stringify(body) } : init;
+  const decoder = new TextDecoder();
+  let tail = ""; // the end of the chunks so far, so a reason split across two chunks is still found
+  const observe = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, out) {
+      out.enqueue(chunk);
+      const seen = tail + decoder.decode(chunk, { stream: true });
+      logReasons(seen, logged);
+      tail = seen.slice(-100);
+    },
+  });
+  return new Response(res.body.pipeThrough(observe), { status: res.status, statusText: res.statusText, headers: res.headers });
 }
 
 /** fetch for one quota bucket: every real request (retries included) takes a slot first; a 429 pauses all calls. */
 export function quotaFetch(bucket: string): typeof fetch {
   return async (input, init) => {
     if (!(await takeLlmRequest(bucket))) throw new Error("unsaid_llm_quota: no request slot (429 pause or daily limit)");
-    const res = await fetch(input, withSignatures(init));
+    const res = await fetch(input, init);
+    if (res.status === 200) return watched(res);
     if (res.status !== 429) return res;
     pauseLlm(60_000);
     // The pause already refuses the SDK's retry, so a Retry-After header must not make it wait (up to a minute) to find that out.
@@ -85,9 +95,24 @@ export const NOT_IN_A_ROOM = "I only work inside an Unsaid room you have joined.
 export const OUT_OF_QUOTA = "The free AI allowance for today is used up, so I can't answer right now. Everything in the room still works by hand; try me again tomorrow.";
 export const BUSY = "The AI is busy, try again in a minute; the room works without it.";
 export const NOT_ANSWERING = "The AI is not answering right now. Everything in the room still works by hand.";
-/** Instead of NOT_ANSWERING when the failed call came after a tool had run: the work is done, only the summary is missing. */
+/** Instead of NOT_ANSWERING when the failed call came after a tool that writes had run: the work is done, only the summary is missing. */
 export const SAVED_NO_SUMMARY = "Done: the change is saved in the room. The AI could not add a summary right now.";
 export const NOTHING_TO_ADD = "I have nothing to add. Try asking in other words.";
+/** The actions with `readOnly: true` (actions/*.ts): after only these ran, nothing was saved. */
+export const READ_ONLY_TOOLS = ["get-room", "view-screen"];
+/** The one extra call when the model's call failed after tools ran: the model sums up their results, with no tools to call. */
+export const SUMMARY_PROMPT =
+  "You are the Unsaid room assistant. The tools below just ran for this member. In one or two short sentences, in the language of the member's last message, tell them what was done, using only these results. Never say that anything was voted, approved or decided unless a result says so.";
+const SUMMARY_TIMEOUT_MS = 12_000;
+
+/** The summary call's input, as data between the delimiters card extraction uses: the member's last words, then each tool result. */
+function summaryInput(messages: EngineMessage[], results: EngineToolResultPart[]): string {
+  const asked = [...messages].reverse().find((m) => m.role === "user" && m.content.some((p) => p.type === "text") && !m.content.some((p) => p.type === "tool-result"));
+  // The framework appends its time and screen blocks (each starts with "\n\n<") after the member's own words.
+  const words = (asked?.content ?? []).map((p) => (p.type === "text" ? p.text : "")).join("\n").split("\n\n<")[0]!.trim().slice(0, 300);
+  const lines = results.map((r) => `${r.toolName}: ${typeof r.content === "string" ? r.content : JSON.stringify(r.content)}`);
+  return `<notes>\n${[words, ...lines].join("\n").replace(/<\/?notes>/gi, "").slice(0, 2000)}\n</notes>`;
+}
 
 /** The whole answer as a fixed text. `before` is what the model had already said: the text then closes that message. */
 async function* fixedReply(text: string, before = ""): AsyncGenerator<EngineEvent> {
@@ -154,13 +179,22 @@ async function* answer(model: AgentEngine, bucket: string, opts: EngineStreamOpt
   if (opts.abortSignal.aborted) return; // the member pressed Stop: nothing more to say
   if (problem) {
     const key = apiKey();
-    console.error("[unsaid-gemini]", (key ? why.split(key).join("[key]") : why).slice(0, 300)); // the reason only: never the request, its headers or the key
+    const reason = (key ? why.split(key).join("[key]") : why).slice(0, 300); // the reason only: never the request, its headers or the key
     // A 429 sets the pause and a used-up day shows in the counters: the quota module knows which of them it was, if any.
     const room: LlmRoom = await llmRoom(bucket).catch(() => "ok");
-    // A call that failed right after a tool ran: the work is done, so the sentence must not read like a failed action.
+    // The successful tool results of the step that just ran, if the failed call was meant to answer after them.
     const last = opts.messages?.[opts.messages.length - 1];
-    const afterTool = !!last?.content?.some((part) => part.type === "tool-result" && !part.isError);
-    return yield* fixedReply(room === "busy" ? BUSY : room === "capped" ? OUT_OF_QUOTA : afterTool ? SAVED_NO_SUMMARY : NOT_ANSWERING, said);
+    const results = (last?.content ?? []).filter((part): part is EngineToolResultPart => part.type === "tool-result" && !part.isError);
+    if (problem === "error" && results.length && !said.trim() && room === "ok") {
+      // A call without tools cannot fail the way a tool call can, so the member still reads the model's own words.
+      const summary = (await completeForSeat(bucket, { systemPrompt: SUMMARY_PROMPT, input: summaryInput(opts.messages, results), timeoutMs: SUMMARY_TIMEOUT_MS }).catch(() => null))?.trim();
+      console.error("[unsaid-gemini]", `${reason}; summary ${summary ? "used" : "failed"}`);
+      if (opts.abortSignal.aborted) return;
+      if (summary) return yield* fixedReply(summary);
+    } else console.error("[unsaid-gemini]", reason);
+    // After a tool that writes the work is done, so the sentence must not read like a failed action.
+    const wrote = results.some((part) => !READ_ONLY_TOOLS.includes(part.toolName));
+    return yield* fixedReply(room === "busy" ? BUSY : room === "capped" ? OUT_OF_QUOTA : wrote ? SAVED_NO_SUMMARY : NOT_ANSWERING, said);
   }
   if (!spoke) return yield* fixedReply(NOTHING_TO_ADD);
   yield* closing;

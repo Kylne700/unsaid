@@ -24,6 +24,7 @@ import { MIGRATIONS } from "../db/migrations";
 import { loadRoom } from "../db/store";
 import { memberByToken } from "../domain/room";
 import { keysDeep, must, SEALED_KEYS } from "../domain/test-helpers";
+import { READ_ONLY_TOOLS } from "./gemini";
 import { guestOwner } from "./guest";
 
 type Act<I, R> = { run: (args: I, ctx?: ActionRunContext) => Promise<R> | R };
@@ -114,7 +115,7 @@ describe("caller allowlist for a member's own judgment", () => {
 });
 
 describe("the module list: what the chat agent can and cannot call", () => {
-  const mods = import.meta.glob(["../../actions/*.ts", "!../../actions/run.ts"], { eager: true }) as Record<string, { default: { agentTool?: boolean } }>;
+  const mods = import.meta.glob(["../../actions/*.ts", "!../../actions/run.ts"], { eager: true }) as Record<string, { default: { agentTool?: boolean; readOnly?: boolean } }>;
   const byName = Object.fromEntries(Object.entries(mods).map(([p, m]) => [p.replace(/^.*\/([^/]+)\.ts$/, "$1"), m.default]));
   it("hides the member-only actions from the agent and keeps the rest", () => {
     const hidden = Object.keys(byName).filter((n) => byName[n]?.agentTool === false).sort();
@@ -131,6 +132,10 @@ describe("the module list: what the chat agent can and cannot call", () => {
     const offered = [...body.matchAll(/"([a-z-]+)"/g)].map((m) => m[1]).sort();
     expect(offered).toEqual(Object.keys(byName).filter((n) => byName[n]?.agentTool !== false).sort());
     expect(offered).not.toContain("approve-draft");
+  });
+
+  it("the chat's list of tools that write nothing names exactly the actions marked readOnly", () => {
+    expect([...READ_ONLY_TOOLS].sort()).toEqual(Object.keys(byName).filter((n) => byName[n]?.readOnly === true).sort());
   });
 });
 

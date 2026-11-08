@@ -3,18 +3,25 @@ import type { AgentEngine, EngineEvent, EngineStreamOptions } from "@agent-nativ
 import { getAgentEngineEntry } from "@agent-native/core/agent/engine";
 import { getDbExec } from "@agent-native/core/db";
 import { runWithRequestContext } from "@agent-native/core/server";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import createRoom from "../../actions/create-room";
 import { MIGRATIONS } from "../db/migrations";
 import { loadRoom } from "../db/store";
 import { memberByToken } from "../domain/room";
 import { must } from "../domain/test-helpers";
-import { assertNoStandardKey, BUSY, CHAT_TIMEOUT_MS, chatEngine, completeForSeat, ENGINE_NAME, GEMINI_MODEL, guardedChatEngine, MAX_OUTPUT_TOKENS, NOT_ANSWERING, NOT_IN_A_ROOM, NOTHING_TO_ADD, OUT_OF_QUOTA, quotaFetch, SAVED_NO_SUMMARY } from "./gemini";
+import { assertNoStandardKey, BUSY, CHAT_TIMEOUT_MS, chatEngine, completeForSeat, ENGINE_NAME, GEMINI_MODEL, guardedChatEngine, MAX_OUTPUT_TOKENS, NOT_ANSWERING, NOT_IN_A_ROOM, NOTHING_TO_ADD, OUT_OF_QUOTA, quotaFetch, SAVED_NO_SUMMARY, SUMMARY_PROMPT } from "./gemini";
 import { guestOwner, seatBucket } from "./guest";
 import { MEMBER_DAILY_CAP, pauseLlm } from "./llm-quota";
 
 beforeAll(async () => {
   for (const m of MIGRATIONS) await getDbExec().execute(m.sql as string);
+});
+// No test may reach Gemini: no key, no network. A test that needs either stubs it itself.
+beforeEach(() => {
+  vi.stubEnv("UNSAID_GEMINI_API_KEY", "");
+  vi.stubGlobal("fetch", async () => {
+    throw new Error("no network in these tests");
+  });
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -272,65 +279,72 @@ describe("assertNoStandardKey", () => {
 
 const SKIP = "skip_thought_signature_validator";
 const asOpts = (messages: unknown) => ({ systemPrompt: "s", messages, tools: [] }) as unknown as Partial<EngineStreamOptions>;
-const toolCall = (name: string, extra: Record<string, unknown> = {}) => ({ functionCall: { name, args: { a: 1 } }, ...extra });
-// A chat turn that ran a tool: the member's message, the model's tool call, and the tool's result that the next model call must read.
-const toolTurn = (isError = false) => [
-  { role: "user", content: [{ type: "text", text: "Please draft cards from my notes." }] },
-  { role: "assistant", content: [{ type: "tool-call", id: "call_1", name: "extract-cards", input: {} }] },
-  { role: "user", content: [{ type: "tool-result", toolCallId: "call_1", toolName: "extract-cards", toolInput: "{}", content: '{"saved":4}', isError }] },
+const ASKED = "Please draft cards from my notes.";
+// A chat turn that ran tools: the member's message, the model's tool calls, and the tools' results that the next model call must read.
+const toolTurn = (isError = false, names = ["extract-cards"]) => [
+  { role: "user", content: [{ type: "text", text: ASKED }] },
+  { role: "assistant", content: names.map((name, i) => ({ type: "tool-call", id: `call_${i}`, name, input: {} })) },
+  { role: "user", content: names.map((name, i) => ({ type: "tool-result", toolCallId: `call_${i}`, toolName: name, toolInput: "{}", content: name === "get-room" ? '{"phase":"cards"}' : '{"saved":4}', isError })) },
 ];
 
-describe("quotaFetch: the thought signature on a replayed tool call", () => {
-  /** What the network gets when `init` goes through quotaFetch for one seat. */
-  async function sendThrough(bucket: string, init?: RequestInit) {
-    const got: (RequestInit | undefined)[] = [];
-    vi.stubGlobal("fetch", async (_input: unknown, i?: RequestInit) => {
-      got.push(i);
-      return new Response("{}");
-    });
-    await quotaFetch(bucket)("https://generativelanguage.googleapis.com/v1beta/models/x:streamGenerateContent?alt=sse", init);
-    return got[0];
+// Gemini's stream as the network gives it: each string is one chunk.
+const enc = new TextEncoder();
+const sseOf = (...chunks: string[]) =>
+  new Response(
+    new ReadableStream<Uint8Array>({
+      start(c) {
+        for (const s of chunks) c.enqueue(enc.encode(s));
+        c.close();
+      },
+    }),
+    { status: 200, headers: { "content-type": "text/event-stream" } },
+  );
+const textChunk = (text: string) => `data: ${JSON.stringify({ candidates: [{ content: { role: "model", parts: [{ text }] }, finishReason: "STOP", index: 0 }], usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 2, totalTokenCount: 7 } })}\r\n\r\n`;
+// What the API sends when the model wrote a broken tool call: no content, the reason, and a message that can quote the room.
+const MALFORMED = `data: ${JSON.stringify({ candidates: [{ finishReason: "MALFORMED_FUNCTION_CALL", finishMessage: "Malformed function call: CANARY-room-note", index: 0 }], usageMetadata: { promptTokenCount: 5, totalTokenCount: 5 } })}\r\n\r\n`;
+/** `s` as two chunks, cut in the middle of `word`. */
+const splitIn = (s: string, word: string): [string, string] => {
+  const at = s.indexOf(word) + Math.floor(word.length / 2);
+  return [s.slice(0, at), s.slice(at)];
+};
+
+describe("quotaFetch: why a call ended, in the server log", () => {
+  /** The answer quotaFetch gives for `res`, read to the end as the SDK reads it, and what it logged meanwhile. */
+  async function through(res: Response) {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal("fetch", async () => res);
+    const s = await seat();
+    const got = await quotaFetch(s.bucket)("https://generativelanguage.googleapis.com/v1beta/models/x:streamGenerateContent?alt=sse", { method: "POST", body: "{}" });
+    const bytes = new Uint8Array(await got.arrayBuffer());
+    const calls = [...log.mock.calls];
+    log.mockRestore();
+    return { got, bytes, calls };
   }
 
-  it("adds the dummy to each functionCall part that has none, and leaves a real signature and everything else as it was", async () => {
-    const s = await seat();
-    const body = {
-      contents: [
-        { role: "user", parts: [{ text: "hi" }] },
-        { role: "model", parts: [toolCall("one"), toolCall("two", { thoughtSignature: "REAL-SIGNATURE" }), { text: "t" }] },
-        { role: "user", parts: [{ functionResponse: { name: "one", response: { ok: true } } }] },
-      ],
-      generationConfig: { maxOutputTokens: 9 },
-    };
-    const sent = await sendThrough(s.bucket, { method: "POST", headers: { "x-goog-api-key": "k" }, body: JSON.stringify(body) });
-    const expected = structuredClone(body);
-    (expected.contents[1]!.parts[0] as Record<string, unknown>).thoughtSignature = SKIP;
-    expect(JSON.parse(String(sent?.body))).toEqual(expected);
-    expect(sent?.method).toBe("POST");
-    expect(sent?.headers).toEqual({ "x-goog-api-key": "k" });
+  it("passes a stream on byte for byte and logs an abnormal reason once, even cut across two chunks, and never the text around it", async () => {
+    const chunks = [textChunk("hello"), ...splitIn(MALFORMED, "MALFORMED_FUNCTION_CALL"), MALFORMED]; // the same reason twice: one line
+    const { bytes, calls } = await through(sseOf(...chunks));
+    expect(bytes).toEqual(enc.encode(chunks.join("")));
+    expect(calls).toEqual([["[unsaid-gemini]", "finish MALFORMED_FUNCTION_CALL"]]);
+    expect(JSON.stringify(calls)).not.toContain("CANARY");
   });
 
-  it("sends everything else exactly as it came: no functionCall, an odd shape, not JSON, no body", async () => {
-    const s = await seat();
-    const bodies = [
-      JSON.stringify({ contents: [{ role: "user", parts: [{ text: "hi" }] }] }),
-      JSON.stringify({ contents: [{ role: "model", parts: [toolCall("one", { thoughtSignature: "REAL" })] }] }),
-      JSON.stringify({ contents: "nope" }),
-      JSON.stringify({ contents: [null, { parts: 5 }, { parts: [null, 3, "x"] }] }),
-      JSON.stringify([1, 2]),
-      "null",
-      "not json {",
-      "",
-    ];
-    for (const body of bodies) {
-      const init = { method: "POST", body };
-      expect(await sendThrough(s.bucket, init)).toBe(init); // the very same request, not a copy
-    }
-    const noBody = { method: "GET" };
-    expect(await sendThrough(s.bucket, noBody)).toBe(noBody);
-    expect(await sendThrough(s.bucket, undefined)).toBeUndefined();
-    const bytes = { method: "POST", body: new Uint8Array([1, 2, 3]) };
-    expect(await sendThrough(s.bucket, bytes)).toBe(bytes);
+  it("logs nothing for a normal end (STOP, MAX_TOKENS), and finds an abnormal reason written with spaces", async () => {
+    expect((await through(sseOf('data: {"candidates": [{"finishReason": "STOP", "index": 0}]}\r\n\r\n', 'data: {"candidates":[{"finishReason":"MAX_TOKENS"}]}\r\n\r\n'))).calls).toEqual([]);
+    expect((await through(sseOf('data: {"candidates": [{"finishReason" : "SAFETY", "index": 0}]}\r\n\r\n'))).calls).toEqual([["[unsaid-gemini]", "finish SAFETY"]]);
+  });
+
+  it("reads a JSON answer from a copy and hands on the answer itself, and leaves anything but a 200 alone", async () => {
+    const body = { promptFeedback: { blockReason: "PROHIBITED_CONTENT" } };
+    const blocked = new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json; charset=UTF-8" } });
+    const json = await through(blocked);
+    expect(json.got).toBe(blocked);
+    expect(JSON.parse(new TextDecoder().decode(json.bytes))).toEqual(body);
+    expect(json.calls).toEqual([["[unsaid-gemini]", "finish PROHIBITED_CONTENT"]]);
+    const failed = new Response('{"candidates":[{"finishReason":"OTHER"}]}', { status: 500, headers: { "content-type": "application/json" } });
+    const other = await through(failed);
+    expect(other.got).toBe(failed);
+    expect(other.calls).toEqual([]);
   });
 });
 
@@ -363,12 +377,22 @@ describe("a tool turn through the real engine (stubbed network that refuses like
     log.mockRestore();
   });
 
-  it("answers a turn that has no tool call as before: nothing added", async () => {
+  it("after a broken tool call (MALFORMED_FUNCTION_CALL) shows the model's summary from one call without tools, and logs only reason words", async () => {
     vi.stubEnv("UNSAID_GEMINI_API_KEY", "test-key-not-real");
-    const sent = apiLike();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const sent: unknown[] = [];
+    vi.stubGlobal("fetch", async (_input: unknown, init?: RequestInit) => {
+      sent.push(JSON.parse(String(init?.body)));
+      return sent.length === 1 ? sseOf(...splitIn(MALFORMED, "MALFORMED_FUNCTION_CALL")) : sseOf(textChunk("I drafted 4 cards from your notes."));
+    });
     const s = await seat();
-    expect(await asSeat(s, () => textOf(chatEngine, asOpts([toolTurn()[0]])))).toBe("FROM-GEMINI");
-    expect(JSON.stringify(sent[0])).not.toContain("thoughtSignature");
+    expect(await asSeat(s, () => textOf(chatEngine, asOpts(toolTurn())))).toBe("I drafted 4 cards from your notes.");
+    expect(sent.length).toBe(2);
+    expect(JSON.stringify(sent[0])).toContain("functionResponse");
+    expect(JSON.stringify(sent[1])).not.toMatch(/functionDeclarations|functionCall|functionResponse/);
+    expect(log.mock.calls).toEqual([["[unsaid-gemini]", "finish MALFORMED_FUNCTION_CALL"], ["[unsaid-gemini]", "model error; summary used"]]);
+    expect(JSON.stringify(log.mock.calls)).not.toContain("CANARY");
+    log.mockRestore();
   });
 });
 
@@ -379,35 +403,109 @@ describe("the chat engine when a call fails after a tool ran", () => {
       throw new Error(text);
     });
 
-  it("says the change is saved, not that the AI is silent, and logs why", async () => {
+  /** A key and a network for the summary call: each request body is kept, and `reply` answers it. */
+  function summaryNet(reply: () => Response) {
+    vi.stubEnv("UNSAID_GEMINI_API_KEY", "test-key-not-real");
+    const sent: unknown[] = [];
+    vi.stubGlobal("fetch", async (_input: unknown, init?: RequestInit) => {
+      sent.push(JSON.parse(String(init?.body)));
+      return reply();
+    });
+    return sent;
+  }
+  // The live failure: the call after the tools ends with an error stop and no text.
+  const textless = () =>
+    modelThat(async function* () {
+      yield { type: "stop", reason: "error" };
+    });
+
+  it("shows the model's own summary when the call after the tools failed: one call without tools, the results as data", async () => {
+    const log = silenced();
+    const sent = summaryNet(() => sseOf(textChunk("  I drafted 4 cards from your notes.  ")));
+    const s = await seat();
+    const turn = toolTurn(false, ["get-room", "extract-cards"]);
+    turn[0] = { role: "user", content: [{ type: "text", text: `${ASKED}\n\n<current-time>2026-11-08T09:00:00Z</current-time>` }] }; // the framework's block after the member's words
+    expect(await asSeat(s, () => textOf(textless(), asOpts(turn)))).toBe("I drafted 4 cards from your notes.");
+    expect(sent.length).toBe(1);
+    const body = sent[0] as { contents: { parts: { text?: string }[] }[]; systemInstruction?: { parts: { text?: string }[] } };
+    expect(body.contents.flatMap((c) => c.parts).map((p) => p.text ?? "").join("")).toBe(`<notes>\n${ASKED}\nget-room: {"phase":"cards"}\nextract-cards: {"saved":4}\n</notes>`);
+    expect(body.systemInstruction?.parts.map((p) => p.text ?? "").join("")).toBe(SUMMARY_PROMPT);
+    expect(JSON.stringify(body)).not.toMatch(/functionDeclarations|functionCall|functionResponse|current-time/);
+    expect(log.mock.calls).toEqual([["[unsaid-gemini]", "model error; summary used"]]);
+    log.mockRestore();
+  });
+
+  it("says the change is saved, not that the AI is silent, when the summary call fails too (an error, only blanks, no key), and logs why", async () => {
     const log = silenced();
     const s = await seat();
+    const refused = () => new Response(JSON.stringify({ error: { code: 400, message: "bad request", status: "INVALID_ARGUMENT" } }), { status: 400, headers: { "content-type": "application/json" } });
+    for (const reply of [refused, () => sseOf(textChunk("   "))]) {
+      summaryNet(reply);
+      expect(await asSeat(s, () => textOf(textless(), asOpts(toolTurn())))).toBe(SAVED_NO_SUMMARY);
+    }
+    vi.stubEnv("UNSAID_GEMINI_API_KEY", "");
     expect(await asSeat(s, () => textOf(throwing("model said no"), asOpts(toolTurn())))).toBe(SAVED_NO_SUMMARY);
     const reported = modelThat(async function* () {
       yield { type: "stop", reason: "error", error: "Function call is missing a thought_signature", statusCode: 400 };
     });
     expect(await asSeat(s, () => textOf(reported, asOpts(toolTurn())))).toBe(SAVED_NO_SUMMARY);
-    expect(log.mock.calls).toEqual([["[unsaid-gemini]", "model said no"], ["[unsaid-gemini]", "HTTP 400: Function call is missing a thought_signature"]]);
+    expect(log.mock.calls.filter((c) => c[0] === "[unsaid-gemini]")).toEqual([
+      ["[unsaid-gemini]", "model error; summary failed"],
+      ["[unsaid-gemini]", "model error; summary failed"],
+      ["[unsaid-gemini]", "model said no; summary failed"],
+      ["[unsaid-gemini]", "HTTP 400: Function call is missing a thought_signature; summary failed"],
+    ]);
     log.mockRestore();
   });
 
-  it("keeps the old sentence when the last message is the member's, when the tool itself failed, or when the run has no messages", async () => {
+  it("says nothing was saved when only tools that read had run, and that the change is saved when one of them wrote", async () => {
     const log = silenced();
+    const s = await seat();
+    expect(await asSeat(s, () => textOf(textless(), asOpts(toolTurn(false, ["get-room", "view-screen"]))))).toBe(NOT_ANSWERING);
+    expect(await asSeat(s, () => textOf(textless(), asOpts(toolTurn(false, ["view-screen", "extract-cards"]))))).toBe(SAVED_NO_SUMMARY);
+    log.mockRestore();
+  });
+
+  it("keeps the old sentence, with no summary call, when the last message is the member's, when the tool itself failed, or when the run has no messages", async () => {
+    const log = silenced();
+    const sent = summaryNet(() => sseOf(textChunk("never shown")));
     const s = await seat();
     for (const opts of [asOpts([toolTurn()[0]]), asOpts(toolTurn(true)), asOpts([]), {}]) {
       expect(await asSeat(s, () => textOf(throwing("x"), opts))).toBe(NOT_ANSWERING);
     }
+    expect(sent).toEqual([]);
+    expect(log.mock.calls.flat().join(" ")).not.toContain("summary");
     log.mockRestore();
   });
 
-  it("keeps the busy sentence when a 429 started the pause during that call", async () => {
+  it("tries no summary when the model ran out of time or had already spoken: the sentence, after its words", async () => {
     const log = silenced();
+    const sent = summaryNet(() => sseOf(textChunk("never shown")));
+    const s = await seat();
+    const hangs = modelThat(async function* (o) {
+      await new Promise((resolve) => o.abortSignal.addEventListener("abort", resolve));
+    }, 80);
+    expect(await asSeat(s, () => textOf(hangs, asOpts(toolTurn())))).toBe(SAVED_NO_SUMMARY);
+    const spoke = modelThat(async function* () {
+      yield { type: "text-delta", text: "Drafting now." };
+      yield { type: "stop", reason: "error" };
+    });
+    expect(await asSeat(s, () => textOf(spoke, asOpts(toolTurn())))).toBe(`Drafting now.\n\n${SAVED_NO_SUMMARY}`);
+    expect(sent).toEqual([]);
+    expect(log.mock.calls.flat().join(" ")).not.toContain("summary");
+    log.mockRestore();
+  });
+
+  it("keeps the busy sentence, with no summary call, when a 429 started the pause during that call", async () => {
+    const log = silenced();
+    summaryNet(() => sseOf(textChunk("never shown")));
     const s = await seat();
     const engine = modelThat(async function* () {
       pauseLlm(400);
       yield { type: "stop", reason: "error", error: PROVIDER_DETAIL, statusCode: 429, providerRetryable: true };
     });
     expect(await asSeat(s, () => textOf(engine, asOpts(toolTurn())))).toBe(BUSY);
+    expect(log.mock.calls.flat().join(" ")).not.toContain("summary");
     await sleep(450);
     log.mockRestore();
   });
